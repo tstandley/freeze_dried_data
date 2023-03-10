@@ -10,10 +10,11 @@ are stored in memory until the file is closed. Values can be any picklable
 object, and are stored on disk.
 
 FDD files can be in either read mode or write mode. Once the file is finalized,
-it can no longer be modified (freeze dried).
+it can no longer be modified (i.e., it is "freeze-dried").
 
 Values are written to disk immediately upon insertion. Keys are written
 as part of the index when the FDD file is closed.
+## Examples
 
 ### Example 1: Creating an FDD file
 ```python
@@ -22,13 +23,13 @@ from freeze_dried_data import FDD
 # creates the file "new dataset.fdd" if it does not exist
 dataset = FDD('new dataset.fdd')
 
-# Adds the entry 'key1': 'value1' to the dataset and writes the value to disk
+# adds the entry 'key1': 'value1' to the dataset and writes the value to disk
 dataset['key1'] = 'value1'
 
-# Adds the entry 1234: 5678 to the dataset and writes the value to disk
+# adds the entry 1234: 5678 to the dataset and writes the value to disk
 dataset[1234] = 5678
 
-# Writes the index including all keys to disk and closes the file.
+# writes the index including all keys to disk and closes the file.
 # FDD files are automatically closed upon __exit__() or __del__()
 dataset.close()
 ```
@@ -64,8 +65,8 @@ with FDD('new dataset.fdd', write_or_overwrite=True) as new_dataset:
   new_dataset['test_key'] = 'test_val'
 # file is automatically closed and written out at the end of the with block.
 
-# opens the FDD file for reading. If the file does not exist an error is thrown.
-# without the read_only=True parameter, an empty file is created if the file
+# opens the FDD file for reading. If the file does not exist, an error is thrown.
+# without the `read_only=True` parameter, an empty file is created if the file
 # does not exist, and the empty file is opened for writing.
 with FDD('new dataset.fdd', read_only=True) as new_dataset:
   print(new_dataset['test_key']) # prints "test_val"
