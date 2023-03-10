@@ -15,7 +15,7 @@ it can no longer be modified (freeze dried).
 Values are written to disk immediately upon insertion. Keys are written
 as part of the index when the FDD file is closed.
 
-### Example 1: creating an fdd file.
+### Example 1: Creating an FDD file
 ```python
 from freeze_dried_data import FDD
 
@@ -34,7 +34,7 @@ dataset.close()
 ```
 
 
-### Example 2: reading an FDD file.
+### Example 2: Reading an FDD file
 ```python
 from freeze_dried_data import FDD
 
