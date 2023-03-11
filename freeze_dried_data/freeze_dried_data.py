@@ -1,5 +1,6 @@
 import pickle as pkl
 import errno
+import os
 # files are stored as: record,record,record,...,last record,index,index_length
 
 class FDD:
