@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='freeze_dried_data',
-    version='1.0.0',
+    version='1.0.1',
     description='A simple format for machine learning datasets',
     url='https://github.com/tstandley/freeze_dried_data',
     author='trevor standley',
