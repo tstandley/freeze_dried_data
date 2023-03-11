@@ -14,6 +14,11 @@ it can no longer be modified (i.e., it is "freeze-dried").
 
 Values are written to disk immediately upon insertion. Keys are written
 as part of the index when the FDD file is closed.
+
+## Installation (PyPI)
+```bash
+pip install freeze-dried-data
+```
 ## Examples
 
 ### Example 1: Creating an FDD file
