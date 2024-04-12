@@ -1,6 +1,6 @@
 import os
 import unittest
-from freeze_dried_data_with_compression import FDD
+from freeze_dried_data import FDD
 import torch
 from torch.utils.data import DataLoader, Dataset
 import random
@@ -102,6 +102,48 @@ class TestFDDBase(unittest.TestCase):
         with FDD(self.test_file) as fdd:
             with self.assertRaises(KeyError):
                 _ = fdd['does_not_exist']
+
+    def test_custom_attributes(self):
+        # Test setting and getting custom attributes
+        with FDD(self.test_file, write_or_overwrite=True) as fdd:
+            fdd.property_one = 'initial'
+            fdd.property_two = 123
+            fdd.property_one = 'changed'
+            
+            self.assertEqual(fdd.property_one, 'changed')
+            self.assertEqual(fdd.property_two, 123)
+            # add three records
+            fdd['key1'] = 'value1'
+            fdd['key2'] = 'value2'
+            fdd['key3'] = 'value3'
+
+            self.assertEqual(len(fdd), 3)
+
+        with FDD(self.test_file, read_only=True) as fdd:
+            self.assertEqual(fdd.property_one, 'changed')
+            self.assertEqual(fdd.property_two, 123)
+            for k,v in fdd.items():
+                self.assertTrue(k in ['key1', 'key2', 'key3'])
+                self.assertTrue(v in ['value1', 'value2', 'value3'])
+    
+    def test_delete_custom_attributes(self):
+        with FDD(self.test_file, write_or_overwrite=True) as fdd:
+            fdd.some_property = 'value'
+            self.assertEqual(fdd.some_property, 'value')
+
+            # Now delete the property
+            del fdd.some_property
+
+            # Attempting to access it should raise AttributeError
+            with self.assertRaises(AttributeError):
+                _ = fdd.some_property
+
+        # Re-open to check persistence of deletion
+        with FDD(self.test_file, read_only=True) as fdd:
+            # The property should not exist anymore, hence an AttributeError should be raised
+            with self.assertRaises(AttributeError):
+                _ = fdd.some_property
+
 
     def test_dataloader(self):
         # Test DataLoader functionality with multiple workers
