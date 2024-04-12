@@ -112,6 +112,9 @@ class FDD:
         name is not recognized as an existing instance or class attribute, it is added to the custom_properties
         dictionary, allowing for dynamic attribute assignment.
 
+        Raises:
+            ValueError: If attempting to set a custom property when the file is not in create mode.
+
         :param name: Name of the attribute to set.
         :param value: Value to assign to the attribute.
         """
@@ -122,8 +125,12 @@ class FDD:
             # If it's a known attribute, use the standard mechanism
             super().__setattr__(name, value)
         else:
-            # Otherwise, store it in custom_properties
+            # Check if in read mode before setting custom properties
+            if self.mode != 'create_mode':
+                raise ValueError("Cannot set custom properties when not in create mode.")
+                
             self.custom_properties[name] = value
+
 
     def __delattr__(self, name: str) -> None:
         """
