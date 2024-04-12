@@ -24,13 +24,13 @@ Alternatively, you can manually move the `freeze_dried_data.py` file into your p
 - **Compression**: Optimize storage and speed by compressing the dataset files. FDD supports multiple compression algorithms including zlib, bz2, and gzip, which can significantly reduce the disk space used by large datasets.
 
 ### File Modes
-- **Explicit File Modes**: Control how files are accessed with `write_or_overwrite` and `read_only` modes. This ensures data integrity by preventing unwanted modifications and handling file access errors gracefully.
+- **Explicit and Implicit File Modes**: Control how files are accessed with `write_or_overwrite` and `read_only` modes. Setting `write_or_overwrite` discards existing files. The `read_only` mode opens files exclusively for reading, throwing an error if the file doesn't exist. If neither mode is specified, the library defaults to read mode for existing files and write mode for new files.
 
 ### Pythonic Interface
 - **Python Dictionary-Like Interface**: FDD files act like Python dictionaries. This makes them intuitive to use for Python developers, as they can employ familiar dictionary operations to interact with the datasets.
 
 ### Seamless Integration
-- **Seamless Integration with Data Loaders**: FDD is designed to work effortlessly with data loaders in machine learning frameworks like PyTorch. This allows for easy use of FDD files in multi-process data loading, which is essential for efficient training of models on large datasets.
+- **Seamless Integration with Data Loaders**: FDD is designed to work effortlessly with data loaders in machine learning frameworks like PyTorch. This allows for easy use of FDD files in multi-process data loading, which is essential for efficient training of models on large datasets. 
 
 ### Context Management
 - **Context Management Support**: FDD supports Python’s context management (using `with` statements), which ensures that files are properly closed after operations are completed, preventing data corruption and resource leaks.
