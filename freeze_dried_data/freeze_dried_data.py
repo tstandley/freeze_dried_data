@@ -7,6 +7,12 @@ import bz2
 import gzip
 # files are stored as: record,record,record,...,last record,index,index_length
 
+def none_compress(data):
+    return data
+
+def none_decompress(data):
+    return data
+
 class FDD:
     """
     A very simple format for machine learning datasets.
@@ -15,6 +21,9 @@ class FDD:
     FDD files can be in either read mode or write mode. Once the file is finalized, it can no longer be modified (i.e., it is "freeze-dried").
     Values are written to disk immediately upon insertion. Keys are written as part of the index when the FDD file is closed.
     """
+
+    CUSTOM_ATTRIBUTE_TAG = 'FDD_CUSTOM_ATTRIBUTES'
+
     def __init__(self, filename: str, write_or_overwrite: bool = False, read_only: bool = False, compression: str = 'none') -> None:
         """
         Initialize a new or existing data file.
@@ -23,36 +32,25 @@ class FDD:
         :param write_or_overwrite: If True, any existing file will be overwritten.
         :param read_only: If True, opens the file in read-only mode and raises FileNotFoundError if the file does not exist.
         """
+        self.__dict__['_initializing'] = True # Use self.__dict__ to bypass __setattr__
 
         self.is_open = False
         self.filename = filename
         self.write_or_overwrite = write_or_overwrite
         self.read_only = read_only
         self.compression = compression
+        self.custom_properties = {}
+        
         
         # Compression functions dictionary
-        compressors = {
-            'zlib': (zlib.compress, zlib.decompress),
-            'bz2': (bz2.compress, bz2.decompress),
-            'gzip': (gzip.compress, gzip.decompress),
-            'none': (lambda x: x, lambda x: x)
-        }
-
-        # if compression is a pair of functions
-        if isinstance(compression, tuple) and len(compression) == 2 and callable(compression[0]) and callable(compression[1]):
-            compressors['custom'] = compression
-            compression = 'custom'
-
-        if compression not in compressors:
-            raise ValueError(f"Unsupported compression type: {compression}")
-        
-        self.compressor = compressors[compression][0]
-        self.decompressor = compressors[compression][1]
+        self.initialize_compression(compression)
 
         # Detects when something like PyTorch DataLoader clones the object.
         os.register_at_fork(after_in_child=self._after_fork)
 
         self._open_file()
+
+        self._initializing = False # now we can use __setattr__
 
     def _open_file(self) -> None:
         """
@@ -72,6 +70,80 @@ class FDD:
         if self.mode == 'create_mode':
             self.current_offset = 0
 
+    def initialize_compression(self, compression):
+        # Then use these in your compressors dictionary
+        compressors = {
+            'zlib': (zlib.compress, zlib.decompress),
+            'bz2': (bz2.compress, bz2.decompress),
+            'gzip': (gzip.compress, gzip.decompress),
+            'none': (none_compress, none_decompress)
+        }
+        if isinstance(compression, tuple) and len(compression) == 2 and callable(compression[0]) and callable(compression[1]):
+            compressors['custom'] = compression
+            compression = 'custom'
+        if compression not in compressors:
+            raise ValueError(f"Unsupported compression type: {compression}")
+        self.compressor = compressors[compression][0]
+        self.decompressor = compressors[compression][1]
+
+    def __getattr__(self, name: str) -> Any:
+        """
+        Get an attribute of the FDD instance.
+
+        This method is called when the requested attribute is not found in the normal
+        places (i.e., it's not an instance attribute nor is it found in the class tree).
+        If the attribute is found in the custom_properties dictionary, it is returned.
+        Otherwise, an AttributeError is raised.
+
+        :param name: Name of the attribute being accessed.
+        :return: The value from the custom_properties dictionary.
+        :raises AttributeError: If the attribute is not found.
+        """
+        if name in self.custom_properties:
+            return self.custom_properties[name]
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        """
+        Set an attribute on the FDD instance.
+
+        This method allows setting of attributes directly on the instance. During initialization,
+        attributes are set directly using the standard mechanism. Post-initialization, if the attribute
+        name is not recognized as an existing instance or class attribute, it is added to the custom_properties
+        dictionary, allowing for dynamic attribute assignment.
+
+        :param name: Name of the attribute to set.
+        :param value: Value to assign to the attribute.
+        """
+        if self._initializing:
+            # Use standard attribute setting mechanism during initialization
+            super().__setattr__(name, value)
+        elif name in self.__dict__ or name in type(self).__dict__:
+            # If it's a known attribute, use the standard mechanism
+            super().__setattr__(name, value)
+        else:
+            # Otherwise, store it in custom_properties
+            self.custom_properties[name] = value
+
+    def __delattr__(self, name: str) -> None:
+        """
+        Delete an attribute from the FDD instance.
+
+        If the attribute is part of custom_properties, it is removed. If it's a regular attribute,
+        it is deleted using the standard mechanism. This allows for dynamic management of both
+        built-in and custom attributes.
+
+        :param name: Name of the attribute to delete.
+        """
+        if name in self.custom_properties:
+            # Remove the attribute from custom_properties if it exists there
+            del self.custom_properties[name]
+        else:
+            # Otherwise, delete the attribute using the standard way
+            super().__delattr__(name)
+
+
+
     def get_existing_index(self) -> Dict[Any, Tuple[int, int]]:
         """
         Retrieve the index map from the end of the file.
@@ -83,6 +155,9 @@ class FDD:
         self.file.seek(-(8 + index_size), 2)
         index_data = self.file.read(index_size)
         index = pkl.loads(self.decompressor(index_data))
+        if self.CUSTOM_ATTRIBUTE_TAG in index:
+            self.custom_properties = index[self.CUSTOM_ATTRIBUTE_TAG]
+            del index[self.CUSTOM_ATTRIBUTE_TAG]
         return index
 
     def close(self) -> None:
@@ -90,6 +165,8 @@ class FDD:
         Close the file and save the index if in create mode.
         """
         if self.mode == 'create_mode':
+            if len(self.custom_properties) > 0:
+                self.index[self.CUSTOM_ATTRIBUTE_TAG] = self.custom_properties
             index_data = self.compressor(pkl.dumps(self.index))
             index_data_length = len(index_data)
             self.file.write(index_data)
