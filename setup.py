@@ -2,10 +2,10 @@ from setuptools import setup
 
 setup(
     name='freeze_dried_data',
-    version='1.0.3',
+    version='1.1.0',
     description='A simple format for machine learning datasets',
     url='https://github.com/tstandley/freeze_dried_data',
-    author='trevor standley',
+    author='Trevor Standley',
     author_email='trevor.standley@gmail.com',
     license='MIT',
     packages=['freeze_dried_data'],
@@ -19,5 +19,7 @@ setup(
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
     ],
 )
