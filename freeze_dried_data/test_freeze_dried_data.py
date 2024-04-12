@@ -144,6 +144,25 @@ class TestFDDBase(unittest.TestCase):
             with self.assertRaises(AttributeError):
                 _ = fdd.some_property
 
+    def test_custom_properties_read_only_mode(self):
+        # Test that setting custom properties in read-only mode raises a ValueError
+        with FDD(self.test_file, write_or_overwrite=True) as fdd:
+            fdd['initial_data'] = 'data'
+            fdd.custom_property = 'test_value'  # Set a custom property in write mode
+
+        # Open the file in read-only mode and attempt to set a custom property
+        with FDD(self.test_file, read_only=True) as fdd:
+            with self.assertRaises(ValueError):
+                fdd.custom_property = 'new_value'  # Attempt to modify the property in read-only mode
+
+            # Ensure the original value is still intact
+            self.assertEqual(fdd.custom_property, 'test_value')
+
+        # Verify that new properties cannot be added in read-only mode
+        with FDD(self.test_file, read_only=True) as fdd:
+            with self.assertRaises(ValueError):
+                fdd.new_custom_property = 'should_fail'
+
 
     def test_dataloader(self):
         # Test DataLoader functionality with multiple workers
