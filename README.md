@@ -127,21 +127,37 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from freeze_dried_data import FDD
 
+with FDD('new dataset.fdd', write_or_overwrite=True) as dataset:
+    dataset.train_keys = ['key1', 'key2', 'key3']
+    dataset.val_keys = ['key4', 'key5']
+    dataset['key1'] = 'train_data1'
+    dataset['key2'] = 'train_data2'
+    dataset['key3'] = 'train_data3'
+    dataset['key4'] = 'val_data1'
+    dataset['key5'] = 'val_data2'
+
 class FDDDataset(Dataset):
-    def __init__(self, filename):
+    def __init__(self, filename, split='train'):
         self.fdd = FDD(filename, read_only=True)
-        self.keys = list(self.fdd.index.keys())
+        if split == 'train':
+            self.keys = self.fdd.train_keys
+        else:
+            self.keys = self.fdd.val_keys
     
     def __len__(self):
-        return len(self.fdd)
+        return len(self.keys)
     
     def __getitem__(self, idx):
         key = self.keys[idx]
         return key, self.fdd[key]
 
-dataset = FDDDataset('new dataset.fdd')
+dataset = FDDDataset('new dataset.fdd', split='train')
 dataloader = DataLoader(dataset, batch_size=2, shuffle=True, num_workers=4)
 
 for key, value in dataloader:
     print(f'Batch: {key} - {value}')
+
+# Example output:
+# Batch: ('key3', 'key2') - ('train_data3', 'train_data2')
+# Batch: ('key1',) - ('train_data1',)
 ```
