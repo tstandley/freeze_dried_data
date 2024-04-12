@@ -1,81 +1,107 @@
 # Freeze Dried Data
 A very simple format for machine learning datasets.
 
+FDD treats datasets stored on disk as if they were Python dictionaries. It is designed for speed and simplicity.
 
-FDD is a simple way to treat datasets on disk like python dictionaries.
-FDD is extremely fast and is implemented as a single ~100 line python file.
+Keys can be any picklable objects that are valid dictionary keys, and are stored in memory until the file is closed. Values can be any picklable object and are stored on disk.
 
-Keys can be any objects that are picklable and valid dictionary keys and
-are stored in memory until the file is closed. Values can be any picklable
-object, and are stored on disk.
+FDD files can operate in either read mode or write mode. Once a file is finalized, it cannot be modified (i.e., it is "freeze-dried").
 
-FDD files can be in either read mode or write mode. Once the file is finalized,
-it can no longer be modified (i.e., it is "freeze-dried").
-
-Values are written to disk immediately upon insertion. Keys are written
-as part of the index when the FDD file is closed.
+Values are written to disk immediately upon insertion, while keys are written as part of the index when the FDD file is closed.
 
 ## Installation
 ```bash
 pip install freeze-dried-data
 ```
-Alternatively, simply move the freeze_dried_data.py file into your project directory.
+Alternatively, you can manually move the `freeze_dried_data.py` file into your project directory.
 
 ## Examples
 
-### Example 1: Creating an FDD file
+### Example 1: Creating an FDD File
 ```python
 from freeze_dried_data import FDD
 
-# creates the file "new dataset.fdd" if it does not exist
+# Create the file "new dataset.fdd" if it does not already exist
 dataset = FDD('new dataset.fdd')
 
-# adds the entry 'key1': 'value1' to the dataset and writes the value to disk
+# Add the entry 'key1': 'value1' to the dataset and write the value to disk
 dataset['key1'] = 'value1'
 
-# adds the entry 1234: 5678 to the dataset and writes the value to disk
+# Add the entry 1234: 5678 to the dataset and write the value to disk
 dataset[1234] = 5678
 
-# writes the index including all keys to disk and closes the file.
-# FDD files are automatically closed upon __exit__() or __del__()
+# Write the index including all keys to disk and close the file
 dataset.close()
 ```
 
-
-### Example 2: Reading an FDD file
+### Example 2: Reading an FDD File
 ```python
 from freeze_dried_data import FDD
 
-# opens the existing file. Unpickles the index including all keys into memory.
+# Open the existing file and unpickle the index including all keys into memory
 dataset = FDD('new dataset.fdd')
 
-# prints:
-# key1 value1
-# 1234 5678
+# Print each key-value pair
 for k, v in dataset.items():
   print(k, v)
 
-# prints "5678"
-print(dataset[1234])
-
-# prints "['key1', 1234]"
-print(list(dataset.keys()))
+# Directly access and print specific items
+print(dataset[1234])        # prints "5678"
+print(list(dataset.keys())) # prints "['key1', 1234]"
 ```
 
-### Example 3: With syntax and explicit mode setting
+### Example 3: Using Explicit File Modes
 ```python
 from freeze_dried_data import FDD
 
-# opens a new fdd for writing using the with syntax. If the file already
-# exists, it will be overwritten.
-with FDD('new dataset.fdd', write_or_overwrite=True) as new_dataset:
-  new_dataset['test_key'] = 'test_val'
-# file is automatically closed and written out at the end of the with block.
+# Create a new dataset or overwrite an existing one
+with FDD('modifiable dataset.fdd', write_or_overwrite=True) as mod_dataset:
+    mod_dataset['new_key'] = 'new_value'
 
-# opens the FDD file for reading. If the file does not exist, an error is thrown.
-# without the `read_only=True` parameter, an empty file is created if the file
-# does not exist, and the empty file is opened for writing.
-with FDD('new dataset.fdd', read_only=True) as new_dataset:
-  print(new_dataset['test_key']) # prints "test_val"
+# Attempt to open an existing file for reading; throw error if the file does not exist
+try:
+    with FDD('modifiable dataset.fdd', read_only=True) as existing_dataset:
+        print(existing_dataset['new_key'])  # prints 'new_value'
+except FileNotFoundError:
+    print("Dataset does not exist.")
+```
 
+### Example 4: Using Compression
+```python
+from freeze_dried_data import FDD
+
+# Open a new FDD file with zlib compression
+with FDD('compressed dataset.zlib.fdd', write_or_overwrite=True, compression='zlib') as compressed_dataset:
+    compressed_dataset['compressed_key'] = 'compressed_value'
+
+# Automatically close and write out the file at the end of the 'with' block
+
+# Reading compressed data
+with FDD('compressed dataset.zlib.fdd', read_only=True, compression='zlib') as compressed_dataset:
+    print(compressed_dataset['compressed_key'])  # prints 'compressed_value'
+```
+
+### Example 5: Using in a PyTorch DataLoader with Workers
+```python
+import torch
+from torch.utils.data import Dataset, DataLoader
+from freeze_dried_data import FDD
+
+class FDDDataset(Dataset):
+    def __init__(self, filename):
+        self.fdd = FDD(filename, read_only=True)
+        self.keys = list(self.fdd.index.keys())
+    
+    def __len__(self):
+        return len(self.fdd)
+    
+    def __getitem__(self, idx):
+        key = self.keys[idx]
+        return key, self.fdd[key]
+
+dataset = FDDDataset('new dataset.fdd')
+dataloader = DataLoader(dataset, batch_size=2, shuffle=True, num_workers=4)
+
+for key, value in dataloader:
+    print(f'Batch: {key} - {value}')
 ```
