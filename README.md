@@ -1,7 +1,7 @@
 # Freeze Dried Data
 A very simple format for machine learning datasets.
 
-FDD allows your entire dataset to be a single file. Instances are loaded from disk when needed and can be loaded in a random order.
+FDD allows your entire dataset to be a single file. Instances are only loaded from disk when needed and can be loaded in random order.
 
 FDD treats datasets stored on disk as if they were Python dictionaries. It is designed for speed and simplicity.
 
