@@ -1,6 +1,8 @@
 # Freeze Dried Data
 A very simple format for machine learning datasets.
 
+FDD allows your entire dataset to be a single file. Instances are loaded from disk when needed and can be loaded in a random order.
+
 FDD treats datasets stored on disk as if they were Python dictionaries. It is designed for speed and simplicity.
 
 Keys can be any picklable objects that are valid dictionary keys, and are stored in memory until the file is closed. Values can be any picklable object and are stored on disk.
