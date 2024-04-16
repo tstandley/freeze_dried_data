@@ -228,9 +228,19 @@ class FDD:
         return self.index.keys()
 
     def items(self) -> Iterator[Tuple[Any, Any]]:
-        """ Yield (key, value) pairs. """
-        for k in self.keys():
-            yield k, self[k]
+        """ Yield (key, value) pairs, with length awareness for tqdm compatibility. """
+        class ItemsWithLength:
+            def __init__(self, parent):
+                self.parent = parent
+
+            def __iter__(self):
+                for k in self.parent.keys():
+                    yield k, self.parent[k]
+
+            def __len__(self):
+                return len(self.parent.index)
+
+        return ItemsWithLength(self)
 
     def __contains__(self, item: Any) -> bool:
         """ Check if a key exists in the index. """
