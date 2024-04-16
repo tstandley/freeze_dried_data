@@ -122,9 +122,10 @@ class TestFDDBase(unittest.TestCase):
         with FDD(self.test_file, read_only=True) as fdd:
             self.assertEqual(fdd.property_one, 'changed')
             self.assertEqual(fdd.property_two, 123)
+            dct = {}
             for k,v in fdd.items():
-                self.assertTrue(k in ['key1', 'key2', 'key3'])
-                self.assertTrue(v in ['value1', 'value2', 'value3'])
+                dct[k] = v
+            self.assertEqual(dct, {'key1': 'value1', 'key2': 'value2', 'key3': 'value3'})
     
     def test_delete_custom_attributes(self):
         with FDD(self.test_file, write_or_overwrite=True) as fdd:
