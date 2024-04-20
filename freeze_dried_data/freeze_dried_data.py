@@ -196,11 +196,7 @@ class FDD:
         if self.mode == 'read_mode':
             raise ValueError("trying to insert into a read-mode FDD. This is not supported.", "key=", key)
         data = self.compressor(pkl.dumps(item))
-        
-        data_len = len(data)
-        self.file.write(data)
-        self.index[key] = (self.current_offset, data_len)
-        self.current_offset += data_len
+        self.write_raw_bytes(key, data)
 
     def __getitem__(self, key: Any) -> Any:
         """
@@ -209,10 +205,38 @@ class FDD:
         :param key: The key of the item to retrieve.
         :return: The item.
         """
+        data = self.read_raw_bytes(key)
+        return pkl.loads(self.decompressor(data))
+    
+    def read_raw_bytes(self, key: Any) -> bytes:
+        """
+        Retrieve an item's bytes by key.
+
+        :param key: The key of the item to retrieve.
+        :return: The item in byte form.
+        """
         start, data_len = self.index[key]
         self.file.seek(start)
         data = self.file.read(data_len)
-        return pkl.loads(self.decompressor(data))
+        return data
+    
+    def write_raw_bytes(self, key: Any, data: bytes) -> None:
+        """
+        Add raw bytes to the file with a specific key.
+
+        :param key: The key under which the item will be stored.
+        :param data: The item to store.
+
+        """
+        if key in self.index:
+            raise ValueError("trying to re-insert a record with key,", key, "FDD cannot re-assign items.")
+        if self.mode == 'read_mode':
+            raise ValueError("trying to insert into a read-mode FDD. This is not supported.", "key=", key)
+        
+        data_len = len(data)
+        self.file.write(data)
+        self.index[key] = (self.current_offset, data_len)
+        self.current_offset += data_len
 
     def _after_fork(self) -> None:
         """
