@@ -1,20 +1,9 @@
 import os
 import unittest
 from freeze_dried_data import FDD
-import torch
-from torch.utils.data import DataLoader, Dataset
 import random
 
-class FDDDataset(Dataset):
-    def __init__(self, filename):
-        self.fdd = FDD(filename, read_only=True)
-        self.keys = list(self.fdd.index.keys())
-    
-    def __len__(self):
-        return len(self.fdd)
-    
-    def __getitem__(self, idx):
-        return self.fdd[self.keys[idx]]
+
 
 class TestFDDBase(unittest.TestCase):
     test_file = '/tmp/test_fdd.fdd'
@@ -166,6 +155,7 @@ class TestFDDBase(unittest.TestCase):
 
 
     def test_dataloader(self):
+        from torch.utils.data import DataLoader, Dataset
         # Test DataLoader functionality with multiple workers
         
         # Create a large dataset
@@ -174,7 +164,16 @@ class TestFDDBase(unittest.TestCase):
         with FDD(self.test_file, write_or_overwrite=True) as fdd:
             fdd.update(data)
 
-
+        class FDDDataset(Dataset):
+            def __init__(self, filename):
+                self.fdd = FDD(filename, read_only=True)
+                self.keys = list(self.fdd.index.keys())
+            
+            def __len__(self):
+                return len(self.fdd)
+            
+            def __getitem__(self, idx):
+                return self.fdd[self.keys[idx]]
         dataset = FDDDataset(self.test_file)
         loader = DataLoader(dataset, batch_size=10, num_workers=8, shuffle=True)
         
