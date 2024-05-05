@@ -189,6 +189,12 @@ class RFDD(BaseFDD):
         
         start, end = self.split_to_index[split]
         self.index = self.system_deserialize(self.read_chunk(start, end))
+
+    def get_available_splits(self) -> List[str]:
+        """
+        :return: A list of available splits.
+        """
+        return list(self.split_to_index.keys())
         
 
     def load_indices(self, split: str = 'all_rows') -> None:
@@ -262,6 +268,12 @@ class FDDReadRow:
         self._fdd_row_parent = parent
         self._fdd_row_cache = [None for _ in range(len(self._fdd_row_index) - 1)]
 
+    def get_dict(self):
+        """
+        :return: A dictionary representation of the row.
+        """
+        return {k: self[i] for i, k in enumerate(self._fdd_row_parent.columns)}
+    
     def __getitem__(self, key: int | str) -> Any:
         """
         Gets the value of the column at the specified index or with the specified name.
@@ -325,12 +337,13 @@ class FDDReadRow:
         if name.startswith('_fdd_row_'):
             super().__setattr__(name, value)
             return
-        
+        if isinstance(self._fdd_row_parent, WFDD):
+            raise AttributeError("Row has already been finalized.")
         columns = self._fdd_row_parent.columns
         if name not in columns:
             raise AttributeError(f"Column not found: {name}")
         
-        index = columns[name]
+        index = columns[name] if isinstance(columns, dict) else columns.index(name)
         self._fdd_row_cache[index] = value
     
     def __repr__(self) -> str:
@@ -363,15 +376,23 @@ class WFDD(BaseFDD):
                  filename: str,
                  columns: Tuple[str] = None,
                  overwrite: bool = False,
+                 reopen: bool = False,
                  system_serialize: callable = pkl.dumps,
+                 system_deserialize: callable = pkl.loads,
                  no_columns_serialize: callable = pkl.dumps,
                  column_to_serialize: tuple[callable] = None,
                  no_columns_deserialize: callable = pkl.loads,
                  column_to_deserialize: tuple[callable] = None) -> None:
         self.__dict__['_initializing'] = True # Use self.__dict__ to bypass __setattr__
         super().__init__(filename)
-        if not overwrite and os.path.exists(filename):
+        
+        if not overwrite and not reopen and os.path.exists(filename):
             raise FileExistsError("File already exists.", filename)
+        
+        if reopen and not os.path.exists(filename):
+            raise FileNotFoundError("File not found.", filename)
+        
+
         
 
         if columns is not None:
@@ -386,16 +407,19 @@ class WFDD(BaseFDD):
         
         
         self.system_serialize = system_serialize
+        self.system_deserialize = system_deserialize
         self.no_columns_serialize = no_columns_serialize
         self.no_columns_deserialize = no_columns_deserialize
 
-        
-        self.file = open(filename, 'wb+')
-        self.unfinished_setters = {}
-        self.index = {}
-        self.columns = columns
-        self.custom_properties = {}
-        self.split_to_index = {}
+        if reopen:
+            self.reopen()
+        else:
+            self.file = open(filename, 'wb+')
+            self.unfinished_setters = {}
+            self.index = {}
+            self.columns = columns
+            self.custom_properties = {}
+            self.split_to_index = {}
         
         self._initializing = False
 
@@ -457,7 +481,9 @@ class WFDD(BaseFDD):
                 return self.no_columns_deserialize(data)
         
         pos = self.file.tell()
-        row = FDDReadRow(self.index[key], self)
+        #TODO: investigate, I think read-row needs to know where to seek after it does the reading.
+        #the tests do check to make sure this works though.
+        row = FDDReadRow(self.index[key], self) 
         self.file.seek(pos)
         return row
         
@@ -488,7 +514,9 @@ class WFDD(BaseFDD):
             return
         elif isinstance(item, dict):
             if all(col not in item for col in self.columns):
-                raise ValueError("Dict contains no entries for columns.")
+                raise ValueError("Dict contains no entries for columns.", [col for col in self.columns if col not in item])
+            if any(col not in self.columns for col in item):
+                raise ValueError("Dict contains columns not in the column list.", [col for col in item if col not in self.columns])
             item = tuple(item.get(col) for col in self.columns)
         elif isinstance(item, tuple):
             if len(item) != len(self.columns):
@@ -510,23 +538,98 @@ class WFDD(BaseFDD):
                 self.file.write(data)
             positions.append(self.file.tell())
             
-        self.index[key] = tuple(positions)
+        self.index[key] = tuple(positions)    
 
-    def make_split(self, split: str, rows: list) -> None:
+    def make_split(self, split: str, rows: list | tuple | set | frozenset, overwrite=False) -> None:
         """
         Create a split in the WFDD.
 
         :param split: The name of the split.
-        :param rows: The list of keys for the split.
+        :param rows: The iterable of keys for the split.
         """
-        if split in self.split_to_index:
-            raise ValueError("Split already exists.", split)
+        if split in self.split_to_index and not overwrite:
+            raise ValueError("Split already exists.", split, 'Use overwrite=True to overwrite it.')
         
-        if isinstance(rows, list):
-            self.split_to_index[split] = {key:self.index[key] for key in rows}
+        if isinstance(rows, (list, tuple, set, frozenset)):
+            self.split_to_index[split] = {key: self.index[key] for key in rows}
         else:
-            raise ValueError("Rows must be a list of keys.")
+            raise ValueError("Rows must be an iterable of keys.")
         
+    def add_to_split(self, split: str, rows: list | tuple | set | frozenset) -> None:
+        """
+        Add rows to a split in the WFDD.
+
+        :param split: The name of the split.
+        :param rows: The iterable of keys for the split.
+        """
+        if split not in self.split_to_index:
+            raise ValueError("Split not found.", split)
+        
+        if isinstance(rows, (list, tuple, set, frozenset)):
+            self.split_to_index[split].update({key: self.index[key] for key in rows})
+        else:
+            raise ValueError("Rows must be an iterable of keys.")
+        
+    def reopen(self) -> None:
+        self.file = open(self.filename, 'rb+')
+        self.file.seek(-8, 2)
+        index_index_size = int.from_bytes(self.file.read(8), 'little')
+
+        self.file.seek(-(8 + index_index_size), 2)
+        index_index_data = self.file.read(index_index_size)
+        index_index = self.system_deserialize(index_index_data)
+        
+        self.split_to_index = {k[7:]:v for k,v in index_index.items() if k.startswith('_split_')}
+        
+
+        # remove splits from index_index
+        for k in self.split_to_index:
+            index_index.pop('_split_'+k)
+
+        index_start, index_end = self.split_to_index["all_rows"]
+        
+        self.index = self.system_deserialize(self.read_chunk(index_start, index_end))
+
+        new_split_to_index = {}
+        for k,v in self.split_to_index.items():
+            if k == "all_rows":
+                continue
+            split_start, split_end = v
+            new_split_to_index[k] = self.system_deserialize(self.read_chunk(split_start, split_end))
+
+        self.split_to_index = new_split_to_index
+        
+        if '_columns_' not in index_index:
+            self.columns = None
+        else:
+            columns_start, columns_end = index_index['_columns_']
+            index_index.pop('_columns_')
+
+            self.columns = self.system_deserialize(self.read_chunk(columns_start, columns_end))
+            
+                
+
+        self.custom_properties = {k[6:]:v for k,v in index_index.items() if k.startswith('_prop_')}
+        
+        # need to figure out where to seek so that we are at the end of the rows. Everything else shoudl be in ram.
+        earliest = 9e99
+        new_custom_properties = {}
+        for k,v in self.custom_properties.items():
+            prop_start, prop_end = v
+            if prop_start < earliest:
+                earliest = prop_start
+            new_custom_properties[k] = self.system_deserialize(self.read_chunk(prop_start, prop_end))
+        self.custom_properties = new_custom_properties
+        
+
+        self.unfinished_setters = {}
+
+        self.file.seek(earliest)
+
+
+        
+
+
     def close(self) -> None:
         """
         Close the WFDD and write data to disk.
@@ -594,6 +697,7 @@ class FDDSetter:
         self._fdd_setter_parent = parent
         self._fdd_setter_key = key
         self._fdd_setter_data = {}
+        self._fdd_setter_finalized = False
 
     def finalize(self) -> None:
         """
@@ -601,7 +705,8 @@ class FDDSetter:
         """
         self._fdd_setter_parent[self._fdd_setter_key] = self._fdd_setter_data
         del self._fdd_setter_parent.unfinished_setters[self._fdd_setter_key]
-
+        self._fdd_setter_finalized = True
+    
     def __setattr__(self, name: str, value: Any) -> None:
         """
         Sets the appropriate column in the row. Coluns aren't written to disk until the row is finalized.
@@ -612,6 +717,9 @@ class FDDSetter:
         if name.startswith('_fdd_setter_'):
             super().__setattr__(name, value)
             return
+        
+        if self._fdd_setter_finalized:
+            raise AttributeError("Row has already been finalized.")
         
         columns = self._fdd_setter_parent.columns
         if name not in columns:

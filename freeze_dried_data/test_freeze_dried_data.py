@@ -343,6 +343,7 @@ class TestFDD(unittest.TestCase):
 
         with RFDD(self.test_file, split='odds') as rfdd:
             self.assertEqual(len(list(rfdd.keys())), 50)
+            self.assertEqual(rfdd.get_available_splits(), ['odds', 'evens', 'big houses', 'reverse_order', 'all_rows'])
             for i, (k,v) in enumerate(rfdd.items()):
                 self.assertEqual(k, f'house_{2*i+1}')
                 self.assertEqual(v.name, f'house_{2*i+1}')
@@ -640,7 +641,8 @@ class TestFDD(unittest.TestCase):
         
         
         def bytes_to_tensor(byte_data, shape=(10,10)):
-            tensor = torch.frombuffer(byte_data, dtype=torch.bfloat16)
+            byte_data = bytearray(byte_data)
+            tensor = torch.frombuffer(byte_data, dtype=torch.bfloat16, )
             return tensor.view(shape)
         
         for custom_serialize, custom_deserialize in zip(custom_serialize_list, custom_deserialize_list):
@@ -654,7 +656,141 @@ class TestFDD(unittest.TestCase):
                     self.assertTrue(torch.allclose(rfdd[k].tensor, v['tensor']))
                     self.assertEqual(rfdd[k].label, v['label'])
 
-        
+    def test_row_has_already_been_finalized(self):
+        with WFDD(self.test_file,columns=('col1','col2'),overwrite=True) as wfdd:
+            wfdd['key1'].col1 = 1
+            wfdd['key1'].col2 = 2
+            with self.assertRaises(AttributeError):
+                wfdd['key1'].col1 = 3
+
+    def test_reopen_file(self):
+        data = {f'key{i}': f'value{i}' for i in range(1000)}
+        with WFDD(self.test_file, overwrite=True) as wfdd:
+            for k, v in data.items():
+                wfdd[k] = v
+
+            wfdd.custom_attribute1 = 'custom1'
+            wfdd.custom_attribute2 = 'custom2'
+            wfdd.make_split('evens', [f'key{i}' for i in range(0,1000,2)])
+        with RFDD(self.test_file) as rfdd:
+            for k,v in data.items():
+                self.assertEqual(rfdd[k], v)
+            rfdd.load_new_split('evens')
+            self.assertEqual(len(list(rfdd.keys())), 500)
+            for i, (k,v) in enumerate(rfdd.items()):
+                self.assertEqual(k, f'key{2*i}')
+                self.assertEqual(v, f'value{2*i}')
+
+        data_2 = {f'key{i}': f'value{i}' for i in range(1000,2000)}
+        with WFDD(self.test_file, reopen=True) as wfdd:
+
+            for k, v in data_2.items():
+                wfdd[k] = v
+            
+            wfdd.custom_attribute1 = 're-written custom1'
+            wfdd.custom_attribute3 = 'custom3'
+            wfdd.add_to_split('evens', [f'key{i}' for i in range(1000,2000,2)])
+            with self.assertRaises(ValueError):
+                wfdd.add_to_split('fake_split', ['key1'])
+            with self.assertRaises(ValueError):
+                wfdd.add_to_split('evens', 234234)
+            wfdd.make_split('odds', [f'key{i}' for i in range(1,2000,2)])
+
+        with self.assertRaises(FileNotFoundError):
+            WFDD('fake_file_doesnt_exist', reopen=True)
+
+        with RFDD(self.test_file) as rfdd:
+            for k,v in data.items():
+                self.assertEqual(rfdd[k], v)
+            for k,v in data_2.items():
+                self.assertEqual(rfdd[k], v)
+
+            rfdd.load_new_split('evens')
+            self.assertEqual(len(list(rfdd.keys())), 1000)
+            for i, (k,v) in enumerate(rfdd.items()):
+                self.assertEqual(k, f'key{2*i}')
+                self.assertEqual(v, f'value{2*i}')
+
+            rfdd.load_new_split('odds')
+            self.assertEqual(len(list(rfdd.keys())), 1000)
+            for i, (k,v) in enumerate(rfdd.items()):
+                self.assertEqual(k, f'key{2*i+1}')
+                self.assertEqual(v, f'value{2*i+1}')
+
+            self.assertEqual(rfdd.custom_attribute1, 're-written custom1')
+            self.assertEqual(rfdd.custom_attribute2, 'custom2')
+            self.assertEqual(rfdd.custom_attribute3, 'custom3')
+
+
+    def test_reopen_file_with_columns(self):
+        data = {f'key{i}': {'name': f'name{i}', 'area': random.random(), 'price': random.random()} for i in range(1000)}
+        with WFDD(self.test_file, columns=('name','area', 'price'), overwrite=True) as wfdd:
+            for k, v in data.items():
+                wfdd[k] = v
+
+            wfdd.custom_attribute1 = 'custom1'
+            wfdd.custom_attribute2 = 'custom2'
+            wfdd.make_split('evens', [f'key{i}' for i in range(0,1000,2)])
+        with RFDD(self.test_file) as rfdd:
+            for k,v in data.items():
+                self.assertEqual(rfdd[k].name, v['name'])
+                self.assertEqual(rfdd[k].area, v['area'])
+                self.assertEqual(rfdd[k].price, v['price'])
+            rfdd.load_new_split('evens')
+            self.assertEqual(len(list(rfdd.keys())), 500)
+            for i, (k,v) in enumerate(rfdd.items()):
+                self.assertEqual(k, f'key{2*i}')
+                self.assertEqual(v.name, f'name{2*i}')
+                self.assertEqual(v.area, data[f'key{2*i}']['area'])
+                self.assertEqual(v.price, data[f'key{2*i}']['price'])
+
+        data_2 = {f'key{i}': {'name': f'name{i}', 'area': random.random(), 'price': random.random()} for i in range(1000,2000)}
+        with WFDD(self.test_file, columns=('name','area', 'price'), reopen=True) as wfdd:
+
+            for k, v in data_2.items():
+                wfdd[k] = v
+            
+            wfdd.custom_attribute1 = 're-written custom1'
+            wfdd.custom_attribute3 = 'custom3'
+            wfdd.add_to_split('evens', [f'key{i}' for i in range(1000,2000,2)])
+            with self.assertRaises(ValueError):
+                wfdd.add_to_split('fake_split', ['key1'])
+            with self.assertRaises(ValueError):
+                wfdd.add_to_split('evens', 234234)
+            wfdd.make_split('odds', [f'key{i}' for i in range(1,2000,2)])
+
+
+    def test_columns_with_partial_dicts(self):
+        with WFDD(self.test_file, columns=('name','area', 'price'), overwrite=True) as wfdd:
+            wfdd['house1'] = {'name': 'house1', 'area': 100}
+            wfdd['house2'] = {'name': 'house2', 'price': 200000}
+
+        with RFDD(self.test_file) as rfdd:
+            self.assertEqual(rfdd['house1'].name, 'house1')
+            self.assertEqual(rfdd['house1'].area, 100)
+            self.assertEqual(rfdd['house1'].price, None)
+            self.assertEqual(rfdd['house2'].name, 'house2')
+            self.assertEqual(rfdd['house2'].area, None)
+            self.assertEqual(rfdd['house2'].price, 200000)
+
+    def test_columns_with_dicts_with_extra_keys(self):
+        with WFDD(self.test_file, columns=('name','area', 'price'), overwrite=True) as wfdd:
+            with self.assertRaises(ValueError):
+                wfdd['house1'] = {'name': 'house1', 'area': 100, 'extra': 'extra'}
+            with self.assertRaises(ValueError):
+                wfdd['house2'] = {'name': 'house2', 'price': 200000, 'extra': 'extra'}
+
+    def test_get_dict(self):
+        with WFDD(self.test_file, columns=('name','area', 'price'), overwrite=True) as wfdd:
+            wfdd['house1'] = {'name': 'house1', 'area': 100, 'price': 100000}
+            wfdd['house2'] = {'name': 'house2', 'area': 200, 'price': 200000}
+            wfdd['house3'] = ('house3', 300, 300000)
+
+        with RFDD(self.test_file) as rfdd:
+            self.assertEqual(rfdd['house1'].get_dict(), {'name': 'house1', 'area': 100, 'price': 100000})
+            self.assertEqual(rfdd['house2'].get_dict(), {'name': 'house2', 'area': 200, 'price': 200000})
+            self.assertEqual(rfdd['house3'].get_dict(), {'name': 'house3', 'area': 300, 'price': 300000})
+
 
     def test_dataloader_integration(self):
         from torch.utils.data import DataLoader, Dataset
