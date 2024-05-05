@@ -1,9 +1,9 @@
 # Freeze Dried Data
 A format for machine learning datasets.
 
-FDD allows your entire dataset to be a single file. Instances are only loaded from disk when needed and can be loaded in random order.
+FDD allows your entire dataset to be a single file while supporting fast random access to records on disk.
 
-Work with FDDs like you would python dictionaries. Keys map to objects. For extra organization and speed, columns can be defined where every row has a value for each column. 
+Work with FDDs like you would python dictionaries. Keys map to objects. For extra organization and speed, columns can be defined such that every row has a value for each column. 
 
 FDD files can operate in either read mode or write mode. Once a file is finalized, it cannot be modified without being re-written (i.e., it is "freeze-dried"). This allows for increased simplicity and speed compared to databases that allow modification.
 
@@ -34,16 +34,19 @@ Custom Splits also maintain order. This makes it easy to compare a ciriculum wit
 Splits also take the place of sharding in many cases. With one split per shard, only the index for the selected split is stored in memory. Everything else can remain on disk. And everything can still remain in a single file.
 
 ### Custom Serialization and Deserialization
-FDD allows custom functions for serializing and deserializing data. This flexibility is especially useful when dealing with complex data types or when performance optimizations are necessary. It also allows on-the-fly compression where the compression algorithm can be chosen on a per-column basis.
+FDD allows custom functions for serializing and deserializing data. This flexibility is especially useful when dealing with complex data types or when performance optimizations are necessary. It also allows on-the-fly compression where the compression algorithm can be chosen on a per-column basis. Finally, custom serialization can be much more efficient when storing tensors (numpy, pytorch, etc.)
 
 ### Custom Properties
 Custom properties are a great place to store dataset metadata such as dataset cards or the code/parameters used to generate the data. In read mode, properties are loaded from disk only when accessed, so this need not incur a runtime cost.
 
 ### Seamless Integration
-FDD is designed to work with data loaders in machine learning frameworks like PyTorch. Unlike other solutions, RFDD objects detect when they've been forked to a new process and re-open their files. 
+FDD is designed to work with data loaders in machine learning frameworks like PyTorch. Unlike other solutions, RFDD objects detect when they've been forked to a new process and re-open their file handles. 
 
 ### Context Management
 FDD supports Python’s context management (using `with` statements), which ensures that files are properly closed after operations are completed, preventing data corruption and resource leaks.
+
+### Easy Appending to Existing Files
+FDD supportes reopening existing files for writing. Reopened files retain all rows, custom properties, and splits already added to the file, while allowing new rows, properties, or splits to be written. Splits can also be modified.
 
 ## Examples
 
@@ -62,6 +65,11 @@ dataset[1234] = 5678
 
 # Write the index including all keys to disk and close the file
 dataset.close()
+
+# or use a with statement to ensure files are closed when finished
+with WFDD('new dataset.fdd', overwrite=True)
+    dataset['key1'] = 'value1'
+    dataset[1234] = 5678
 ```
 
 ### Example 2: Reading an FDD File
@@ -78,6 +86,16 @@ for k, v in dataset.items():
 # Directly access and print specific items
 print(dataset[1234])        # prints "5678"
 print(list(dataset.keys())) # prints "['key1', 1234]"
+
+dataset.close()
+
+# or using a with statement
+with RFDD('new dataset.fdd'):
+    for k, v in dataset.items():
+        print(k,v)
+    print(dataset[1234])
+    print(list(dataset.keys()))
+    
 ```
 
 ### Example 3: Creating a file with columns
@@ -113,20 +131,38 @@ with WFDD('text_dataset.fdd', columns=['text', 'label']) as dataset:
 from freeze_dried_data import RFDD
 
 with RFDD('text_dataset.fdd') as dataset:
-    for row in dataset:
-        print(row['text'], row['label']) 
+    print(dataset.columns)
+    for key, row in dataset.items():
+        print(row['text'], row['label'])
+        # or
+        print(row.text, row.label)
+        # or
+        print(row[0], row[1])
 
 # output:
+# ['text', 'label']
+# This is an example document. 1
+# This is an example document. 1
 # This is an example document. 1
 # Another document for classification. 0
+# Another document for classification. 0
+# Another document for classification. 0
+# A third document. 1
+# A third document. 1
 # A third document. 1
 # A fourth document. 0
+# A fourth document. 0
+# A fourth document. 0
 # A fifth document. None
+# A fifth document. None
+# A fifth document. None
+# A sixth document. None
+# A sixth document. None
 # A sixth document. None
 
 ```
 
-### Example 5: Using Custom Properties
+### Example 5: Using Custom Properties and Custom Splits
 ```python
 from freeze_dried_data import WFDD
 
@@ -137,13 +173,24 @@ with WFDD('dataset_with_properties.fdd') as dataset:
     dataset.description = 'Sample dataset with custom properties.'
 
     # Add data to the dataset
-    dataset['key1'] = 'value1'
+    dataset['key1'] = 'train_data1'
+    dataset['key2'] = 'train_data2'
+    dataset['key3'] = 'train_data3'
+    dataset['key4'] = 'val_data1'
+    dataset['key5'] = 'val_data2'
+    dataset.make_split('train', ['key1', 'key2', 'key3'])
+    dataset.make_split('val', ['key4', 'key5'])
+
 
 # Verify and print custom properties
-with RFDD('dataset_with_properties.fdd') as loaded_dataset:
+with RFDD('dataset_with_properties.fdd', split='train') as loaded_dataset:
     print('Creator:', loaded_dataset.creator)
     print('Creation Date:', loaded_dataset.creation_date)
     print('Description:', loaded_dataset.description)
+    # train rows loaded into the index
+    dataset.load_new_split('val')
+    # val rows loaded into the index
+
 ```
 
 ### Example 6: Using custom Serialization
@@ -168,28 +215,51 @@ with RFDD('custom_data.fdd', system_deserialize=my_deserializer) as dataset:
 
 ```
 
-### Example 7: Using in a PyTorch DataLoader with Workers
+### Example 7: File Reopening
+```python
+data = {f'key{i}': f'value{i}' for i in range(1000)}
+with WFDD('test_file.fdd', overwrite=True) as wfdd:
+    for k, v in data.items():
+        wfdd[k] = v
+
+    wfdd.custom_attribute1 = 'custom1'
+    wfdd.custom_attribute2 = 'custom2'
+    wfdd.make_split('evens', [f'key{i}' for i in range(0,1000,2)])
+
+data_2 = {f'key{i}': f'value{i}' for i in range(1000,2000)}
+with WFDD('test_file.fdd', reopen=True) as wfdd:
+    for k, v in data_2.items():
+        wfdd[k] = v
+    
+    wfdd.custom_attribute1 = 're-written custom1'
+    wfdd.custom_attribute3 = 'custom3'
+
+    wfdd.add_to_split('evens', [f'key{i}' for i in range(1000,2000,2)])
+    wfdd.make_split('odds', [f'key{i}' for i in range(1,2000,2)])
+
+# test_file.fdd now contains all 2k rows, both full splits, and all three attributes.
+```
+
+### Example 8: Using in a PyTorch DataLoader with Workers
 ```python
 import torch
 from torch.utils.data import Dataset, DataLoader
 from freeze_dried_data import WFDD
 
 with WFDD('new dataset.fdd') as dataset:
-    dataset.train_keys = ['key1', 'key2', 'key3']
-    dataset.val_keys = ['key4', 'key5']
+    
     dataset['key1'] = 'train_data1'
     dataset['key2'] = 'train_data2'
     dataset['key3'] = 'train_data3'
     dataset['key4'] = 'val_data1'
     dataset['key5'] = 'val_data2'
+    dataset.make_split('train', ['key1', 'key2', 'key3'])
+    dataset.make_split('val', ['key4', 'key5'])
 
 class FDDDataset(Dataset):
     def __init__(self, filename, split='train'):
-        self.fdd = RFDD(filename)
-        if split == 'train':
-            self.keys = self.fdd.train_keys
-        else:
-            self.keys = self.fdd.val_keys
+        self.fdd = RFDD(filename,split=split)
+        self.keys = list(self.fdd.keys())
     
     def __len__(self):
         return len(self.keys)
@@ -199,6 +269,9 @@ class FDDDataset(Dataset):
         return key, self.fdd[key]
 
 dataset = FDDDataset('new dataset.fdd', split='train')
+
+# Each worker gets a separate copy of the dataset object.
+# The file handles will be refreshed automatically.
 dataloader = DataLoader(dataset, batch_size=2, shuffle=True, num_workers=4)
 
 for key, value in dataloader:
