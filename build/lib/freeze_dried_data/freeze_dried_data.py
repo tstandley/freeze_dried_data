@@ -626,6 +626,10 @@ class WFDD(BaseFDD):
 
         self.file.seek(earliest)
 
+
+        
+
+
     def close(self) -> None:
         """
         Close the WFDD and write data to disk.
@@ -733,57 +737,3 @@ class FDDSetter:
         :param value: The value to set.
         """
         self.__setattr__(key, value)
-
-
-def add_column(input_path, output_path, column_name, column_data, overwrite=False, column_serialize=pkl.dumps):
-    """
-    Add a column to a freeze-dried data file.
-
-    :param input_path: The path to the input freeze-dried data file.
-    :param output_path: The path to the output freeze-dried data file.
-    :param column_name: The name of the column to add.
-    :param column_data: The data for the column.
-    """
-    
-    # if it has an items() funciton, call it
-    if hasattr(column_data, 'items'):
-        column_data = column_data.items()
-
-    with RFDD(input_path) as rfdd:
-        if column_name in rfdd.columns:
-            raise ValueError("Column already exists.", column_name)
-
-        new_columns = list(rfdd.columns) + [column_name]
-        with WFDD(output_path, columns=new_columns, overwrite=overwrite) as wfdd:
-            
-            for key, value in column_data:
-                row_index = rfdd.index[key]
-                start, end = row_index[0], row_index[-1]
-
-                row_data = rfdd.read_chunk(start, end)
-
-                new_data_for_row = column_serialize(value)
-                current_index = list(row_index)
-                current_index.append(end+len(row_data))
-
-                start = wfdd.file.tell()
-
-                current_index = [i-current_index[0]+start for i in current_index]
-
-                wfdd.index[key] = tuple(current_index)
-
-                row_data+=new_data_for_row
-                wfdd.file.write(row_data)
-
-            # copy the splits
-            rfdd.get_available_splits()
-            for split in rfdd.get_available_splits():
-                rfdd.load_new_split(split)
-                rows = list(rfdd.index.keys())
-                wfdd.make_split(split, rows)
-
-            for k in rfdd.custom_properties.keys():
-                v = rfdd.__getattr__(k)
-                wfdd.__setattr__(k, v)
-
-

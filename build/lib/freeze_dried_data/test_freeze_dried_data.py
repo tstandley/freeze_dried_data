@@ -1,33 +1,24 @@
 import os
 import unittest
 import random
-from freeze_dried_data import RFDD, WFDD, add_column
+from freeze_dried_data import RFDD, WFDD
 
 class TestFDD(unittest.TestCase):
     test_file = '/tmp/test_fdd.fdd'
     test_file2 = '/tmp/test_fdd2.fdd'
-    test_file3 = '/tmp/test_fdd3.fdd'
-    test_file4 = '/tmp/test_fdd4.fdd'
+    compression_type = 'none'  # Can be updated for each test subclass
 
     def setUp(self):
         if os.path.exists(self.test_file):
             os.remove(self.test_file)
         if os.path.exists(self.test_file2):
             os.remove(self.test_file2)
-        # if os.path.exists(self.test_file3):
-        #     os.remove(self.test_file3)
-        # if os.path.exists(self.test_file4):
-        #     os.remove(self.test_file4)
 
     def tearDown(self):
         if os.path.exists(self.test_file):
             os.remove(self.test_file)
         if os.path.exists(self.test_file2):
             os.remove(self.test_file2)
-        # if os.path.exists(self.test_file3):
-        #     os.remove(self.test_file3)
-        # if os.path.exists(self.test_file4):
-        #     os.remove(self.test_file4)
 
     def test_basic_operations_no_columns(self):
         # Write operations
@@ -800,40 +791,6 @@ class TestFDD(unittest.TestCase):
             self.assertEqual(rfdd['house2'].get_dict(), {'name': 'house2', 'area': 200, 'price': 200000})
             self.assertEqual(rfdd['house3'].get_dict(), {'name': 'house3', 'area': 300, 'price': 300000})
 
-    def test_add_column(self):
-        
-        with WFDD(self.test_file, columns=('name','area'), overwrite=True) as wfdd:
-            for i in range(100):
-                wfdd[f'house_{i}'] = {'name': f'house_{i}', 'area': 100+10*i}
-
-            wfdd.custom_attribute1 = 'custom1'
-
-            wfdd.make_split('evens', [f'house_{i}' for i in range(0,100,2)])
-
-        new_col = {}
-        for i in range(100):
-            new_col[f'house_{i}'] = 1000+100*i
-        
-        
-        if os.path.exists(self.test_file3):
-            os.remove(self.test_file3)
-
-        add_column(self.test_file, self.test_file3, 'price', new_col)
-
-        with RFDD(self.test_file3) as rfdd:
-            for i in range(100):
-                self.assertEqual(rfdd[f'house_{i}'].price, 1000+100*i)
-
-            rfdd.load_new_split('evens')
-            for i in range(50):
-                self.assertEqual(rfdd[f'house_{2*i}'].price, 1000+200*i)
-
-            self.assertEqual(rfdd.custom_attribute1, 'custom1')
-
-        with self.assertRaises(ValueError):
-            add_column(self.test_file3, self.test_file4, 'price', new_col)
-
-            
 
     def test_dataloader_integration(self):
         from torch.utils.data import DataLoader, Dataset
@@ -899,7 +856,6 @@ class TestFDD(unittest.TestCase):
             self.assertEqual(data[1].shape, (10,))
 
         dataset.rfdd.close()
-
             
         
  
