@@ -764,7 +764,7 @@ def add_column(input_path, output_path, column_name, column_data, overwrite=Fals
 
                 new_data_for_row = column_serialize(value)
                 current_index = list(row_index)
-                current_index.append(end+len(row_data))
+                current_index.append(end+len(new_data_for_row))
 
                 start = wfdd.file.tell()
 
