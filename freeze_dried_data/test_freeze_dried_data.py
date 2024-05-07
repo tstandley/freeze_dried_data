@@ -78,6 +78,9 @@ class TestFDD(unittest.TestCase):
             self.assertEqual(rfdd['house3'][0], 'house3')
             self.assertEqual(rfdd['house3'][1], 300)
             self.assertEqual(rfdd['house3'][2], 300000)
+            self.assertEqual(rfdd['house1','name'], 'house1')
+            self.assertEqual(rfdd['house1','area'], 100)
+            self.assertEqual(rfdd['house1','price'], 100000)
 
 
             for k,v in rfdd.items():
@@ -99,6 +102,7 @@ class TestFDD(unittest.TestCase):
             # name: house3
             # area: 300
             # price: 300000
+
 
     def test_file_exists(self):
         with WFDD(self.test_file, overwrite=True) as wfdd:

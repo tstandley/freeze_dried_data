@@ -147,9 +147,20 @@ class RFDD(BaseFDD):
         :return: The row with the specified key. 
         :raises KeyError: If the key is not found.
         """
-
+        
         if key not in self.index:
-            raise KeyError("Key not found.", key)
+            if isinstance(key, tuple):
+                if key in self.index:
+                    return self[key]
+                else:
+                    if key[0] in self.index:
+                        indices = self.index[key[0]]
+                        col_index = self.columns[key[1]]
+                        start, end = indices[col_index:col_index+2]
+                        data = self.read_chunk(start, end)
+                        return self.column_to_deserialize[col_index](data)
+            else:
+                raise KeyError("Key not found.", key)
         
         if self.columns is None:
             
