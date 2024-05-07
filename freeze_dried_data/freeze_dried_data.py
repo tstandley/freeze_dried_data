@@ -587,6 +587,7 @@ class WFDD(BaseFDD):
         index_index_size = int.from_bytes(self.file.read(8), 'little')
 
         self.file.seek(-(8 + index_index_size), 2)
+        earliest = self.file.tell()
         index_index_data = self.file.read(index_index_size)
         index_index = self.system_deserialize(index_index_data)
         
@@ -598,6 +599,7 @@ class WFDD(BaseFDD):
             index_index.pop('_split_'+k)
 
         index_start, index_end = self.split_to_index["all_rows"]
+        earliest = min(index_start,earliest)
         
         self.index = self.system_deserialize(self.read_chunk(index_start, index_end))
 
@@ -606,6 +608,7 @@ class WFDD(BaseFDD):
             if k == "all_rows":
                 continue
             split_start, split_end = v
+            earliest = min(split_start,earliest)
             new_split_to_index[k] = self.system_deserialize(self.read_chunk(split_start, split_end))
 
         self.split_to_index = new_split_to_index
@@ -614,6 +617,7 @@ class WFDD(BaseFDD):
             self.columns = None
         else:
             columns_start, columns_end = index_index['_columns_']
+            earliest = min(columns_start, earliest)
             index_index.pop('_columns_')
 
             self.columns = self.system_deserialize(self.read_chunk(columns_start, columns_end))
@@ -623,7 +627,6 @@ class WFDD(BaseFDD):
         self.custom_properties = {k[6:]:v for k,v in index_index.items() if k.startswith('_prop_')}
         
         # need to figure out where to seek so that we are at the end of the rows. Everything else shoudl be in ram.
-        earliest = 9e99
         new_custom_properties = {}
         for k,v in self.custom_properties.items():
             prop_start, prop_end = v
