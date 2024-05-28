@@ -1,8 +1,7 @@
 import os
 import unittest
 import random
-from freeze_dried_data import RFDD, WFDD, add_column
-from efficient_index import FDDIndexBase
+from freeze_dried_data import RFDD, WFDD, add_column, FDDIndexBase
 
 class TestFDD(unittest.TestCase):
     test_file = '/tmp/test_fdd.fdd'
