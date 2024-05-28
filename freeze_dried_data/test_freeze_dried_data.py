@@ -2,6 +2,7 @@ import os
 import unittest
 import random
 from freeze_dried_data import RFDD, WFDD, add_column
+from efficient_index import FDDIndexBase
 
 class TestFDD(unittest.TestCase):
     test_file = '/tmp/test_fdd.fdd'
@@ -560,10 +561,15 @@ class TestFDD(unittest.TestCase):
 
 
         def json_serializer(obj):
+            if isinstance(obj, FDDIndexBase):
+                return pkl.dumps(obj)
             return json.dumps(obj).encode('utf-8')
 
         def json_deserializer(data):
-            return json.loads(data.decode('utf-8'))
+            try:
+                return json.loads(data.decode('utf-8'))
+            except:
+                return pkl.loads(data)
         
         custom_deserialize_list = [lambda x:pkl.loads(x[:-1]), lambda x: pkl.loads(zlib.decompress(x)), lambda x: pkl.loads(bz2.decompress(x)), lambda x: pkl.loads(gzip.decompress(x)), json_deserializer]
         custom_serialize_list = [lambda x:pkl.dumps(x)+b'\n', lambda x: zlib.compress(pkl.dumps(x)), lambda x: bz2.compress(pkl.dumps(x)), lambda x: gzip.compress(pkl.dumps(x)), json_serializer]

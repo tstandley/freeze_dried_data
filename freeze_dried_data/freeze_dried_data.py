@@ -5,7 +5,7 @@ import sys
 import warnings
 import zlib
 import torch
-
+from efficient_index import FDDIndexKeyless, FDDIndexComparableKey, FDDIntList, FDDIndexGeneral
 
 # data is stored in the following format:
 # [record, record, ..., record], [custom_property, custom_property, ..., custom_property], [split, split, ..., split], [columns], index_index, 8 bytes for index_index length
@@ -192,11 +192,12 @@ class RFDD(BaseFDD):
                     if key[0] in self.index:
                         indices = self.index[key[0]]
                         col_index = self.columns[key[1]]
-                        start, end = indices[col_index:col_index+2]
+                        start = indices[col_index]
+                        end = indices[col_index+1]
                         data = self.read_chunk(start, end)
                         return self.column_to_deserialize[col_index](data)
             else:
-                raise KeyError("Key not found.", key)
+                raise KeyError("Key not found.", key, self.index.keys())
         
         if self.columns is None:
             
@@ -343,7 +344,8 @@ class FDDReadRow:
         if isinstance(key, str):
             key = self._fdd_row_parent.columns[key]
         if self._fdd_row_cache[key] is None:
-            start, end = self._fdd_row_index[key:key+2]
+            start = self._fdd_row_index[key]
+            end = self._fdd_row_index[key+1]
             if start == end:
                 self._fdd_row_cache[key] = None
                 # alternatively, we could raise an error here
@@ -417,10 +419,6 @@ class FDDReadRow:
 
 
 
-
-
-
-
 class WFDD(BaseFDD):
     """
     WFDD (Freeze Dried Data Writer) class for writing freeze-dried data files.
@@ -444,6 +442,7 @@ class WFDD(BaseFDD):
                  reopen: bool = False,
                  system_serialize: callable = pkl.dumps,
                  system_deserialize: callable = pkl.loads,
+                 preserve_order=True,
                  ) -> None:
         self.__dict__['_initializing'] = True # Use self.__dict__ to bypass __setattr__
         super().__init__(filename)
@@ -478,14 +477,16 @@ class WFDD(BaseFDD):
         self.system_deserialize = system_deserialize
         self.no_columns_serialize = pkl.dumps
         self.no_columns_deserialize = pkl.loads
+        self.preserve_order = preserve_order
 
         if reopen:
             self.reopen()
         else:
             self.file = open(filename, 'wb+')
             self.unfinished_setters = {}
-            self.index = {}
+            
             self.columns = tuple(columns.keys()) if columns is not None else None
+            self.index = FDDIndexGeneral(len(columns)+1 if columns is not None else 2)
             self.custom_properties = {}
             self.split_to_index = {}
         
@@ -608,7 +609,7 @@ class WFDD(BaseFDD):
             
         self.index[key] = tuple(positions)    
 
-    def make_split(self, split: str, rows: list | tuple | set | frozenset, overwrite=False) -> None:
+    def make_split(self, split: str, rows: list | tuple | set | frozenset, overwrite=False, keyless=False) -> None:
         """
         Create a split in the WFDD.
 
@@ -619,7 +620,26 @@ class WFDD(BaseFDD):
             raise ValueError("Split already exists.", split, 'Use overwrite=True to overwrite it.')
         
         if isinstance(rows, (list, tuple, set, frozenset)):
-            self.split_to_index[split] = {key: self.index[key] for key in rows}
+            
+            if keyless:
+                split_index = FDDIndexKeyless(num_vals=len(self.columns)+1 if self.columns is not None else 2)
+                for i, key in enumerate(rows):
+                    split_index[i] = self.index[key]
+            else:
+                split_index_dict = {key: self.index[key] for key in rows}
+                try:
+                    if not self.preserve_order:
+                        split_index = FDDIndexComparableKey(split_index_dict)
+                    else:
+                        raise ValueError("dummy error go to except block")
+                except:
+                    split_index = FDDIndexGeneral(len(self.columns)+1 if self.columns is not None else 2)
+                    for k,v in split_index_dict.items():
+                        split_index[k] = v
+            if split == 'all_rows':
+                self.index = split_index
+            else:
+                self.split_to_index[split] = split_index
         else:
             raise ValueError("Rows must be an iterable of keys.")
         
@@ -750,6 +770,15 @@ class WFDD(BaseFDD):
             self.file.write(property_data)
             property_end = self.file.tell()
             index_index["_prop_"+k] = (property_start, property_end)
+
+        if not isinstance(self.index, FDDIndexKeyless):
+            try:
+                if not self.preserve_order:
+                    self.index = FDDIndexComparableKey(self.index)
+            except:
+                pass
+        
+        
 
         self.split_to_index['all_rows'] = self.index
         for k,v in self.split_to_index.items():
