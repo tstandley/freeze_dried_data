@@ -3,9 +3,50 @@ import os
 from typing import Any, Dict, Iterator, Tuple, Optional, Union, List
 import sys
 import warnings
+import zlib
+import torch
+
 
 # data is stored in the following format:
 # [record, record, ..., record], [custom_property, custom_property, ..., custom_property], [split, split, ..., split], [columns], index_index, 8 bytes for index_index length
+
+
+
+
+type_to_serializer = {
+    'any': pkl.dumps,
+    'str': lambda x: x.encode('utf-8'),
+    'str_compressed': lambda x: zlib.compress(x.encode('utf-8')),
+    'bytes': lambda x: x,
+    'int128': lambda x: x.to_bytes(16, 'little'),
+    'int64': lambda x: x.to_bytes(8, 'little'),
+    'int': lambda x: x.to_bytes(8, 'little'),
+    'int32': lambda x: x.to_bytes(4, 'little'),
+    'int16': lambda x: x.to_bytes(2, 'little'),
+    'int8': lambda x: x.to_bytes(1, 'little'),
+    'numpy': pkl.dumps,
+    'torch': lambda x: pkl.dumps(x.cpu().numpy()),
+    'float': pkl.dumps
+}
+
+type_to_deserializer = {
+    'any': pkl.loads,
+    'str': lambda x: x.decode('utf-8'),
+    'str_compressed': lambda x: zlib.decompress(x).decode('utf-8'),
+    'bytes': lambda x: x,
+    'int128': lambda x: int.from_bytes(x, 'little'),
+    'int64': lambda x: int.from_bytes(x, 'little'),
+    'int': lambda x: int.from_bytes(x, 'little'),
+    'int32': lambda x: int.from_bytes(x, 'little'),
+    'int16': lambda x: int.from_bytes(x, 'little'),
+    'int8': lambda x: int.from_bytes(x, 'little'),
+    'numpy': pkl.loads,
+    'torch': lambda x: torch.from_numpy(pkl.loads(x)),
+    'float': pkl.loads
+}
+
+
+
 
 class BaseFDD:
     """
@@ -84,29 +125,24 @@ class RFDD(BaseFDD):
     :param filename: The path to the freeze-dried data file.
     :param split: The split name to load, defaults to the all rows split.
     :param system_deserialize: The function to use for deserializing the index, splits, and columns.
-    :param no_columns_deserialize: The function to use for deserializing rows when there are no columns.
     :param column_to_deserialize: A tuple of functions to use for deserializing columns. There must be
         one function for each column.
     """
     def __init__(self,
                  filename: str,
                  split: str = 'all_rows',
-                 system_deserialize: callable = pkl.loads,
-                 no_columns_deserialize: callable = pkl.loads,
-                 column_to_deserialize: tuple[callable] = None) -> None:
+                 system_deserialize: callable = pkl.loads) -> None:
         super().__init__(filename)
         self.file = open(filename, 'rb')
         self.system_deserialize = system_deserialize
-        self.no_columns_deserialize = no_columns_deserialize
+        self.no_columns_deserialize = pkl.loads
         
         
         self.load_indices(split)
 
         if self.columns is not None:
-            if column_to_deserialize is None:
+            if self.column_to_deserialize is None:
                 self.column_to_deserialize = tuple(self.system_deserialize for i in range(len(self.columns)))
-            else:
-                self.column_to_deserialize = column_to_deserialize
         
         self.custom_properties_cache = {}
         self.read_row_cache = None
@@ -241,6 +277,18 @@ class RFDD(BaseFDD):
             self.columns = self.system_deserialize(self.read_chunk(columns_start, columns_end))
             if self.columns is not None:
                 self.columns = {n: i for i, n in enumerate(self.columns)}
+        
+        if '_column_def_' in index_index:
+            column_def_start, column_def_end = index_index['_column_def_']
+            index_index.pop('_column_def_')
+            try:
+                self.column_def = self.system_deserialize(self.read_chunk(column_def_start, column_def_end))
+            except Exception as e:
+                import dill
+                self.column_def = dill.loads(self.read_chunk(column_def_start, column_def_end))
+
+            self.column_to_deserialize = {v: type_to_deserializer[t] if isinstance(t, str) else t[1] for v, t in self.column_def.items()}   
+            self.column_to_deserialize = tuple(self.column_to_deserialize.values())
                 
 
         self.custom_properties = {k[6:]:v for k,v in index_index.items() if k.startswith('_prop_')}
@@ -367,6 +415,12 @@ class FDDReadRow:
             rep += f"{key}: {value}\n"
         return rep
 
+
+
+
+
+
+
 class WFDD(BaseFDD):
     """
     WFDD (Freeze Dried Data Writer) class for writing freeze-dried data files.
@@ -385,15 +439,12 @@ class WFDD(BaseFDD):
     """
     def __init__(self,
                  filename: str,
-                 columns: Tuple[str] = None,
+                 columns: dict[str, str | tuple[callable, callable]] = None,
                  overwrite: bool = False,
                  reopen: bool = False,
                  system_serialize: callable = pkl.dumps,
                  system_deserialize: callable = pkl.loads,
-                 no_columns_serialize: callable = pkl.dumps,
-                 column_to_serialize: tuple[callable] = None,
-                 no_columns_deserialize: callable = pkl.loads,
-                 column_to_deserialize: tuple[callable] = None) -> None:
+                 ) -> None:
         self.__dict__['_initializing'] = True # Use self.__dict__ to bypass __setattr__
         super().__init__(filename)
         
@@ -403,24 +454,30 @@ class WFDD(BaseFDD):
         if reopen and not os.path.exists(filename):
             raise FileNotFoundError("File not found.", filename)
         
-
+        column_to_serialize = {v: type_to_serializer[t] if isinstance(t, str) else t[0] for v, t in columns.items()} if columns is not None else None
         
+        column_to_deserialize = {v: type_to_deserializer[t] if isinstance(t, str) else t[1] for v, t in columns.items()} if columns is not None else None
+        
+        self.column_def = columns
 
         if columns is not None:
             if column_to_deserialize is None:
                 self.column_to_deserialize = tuple(pkl.loads for i in range(len(columns)))
             else:
-                self.column_to_deserialize = column_to_deserialize
+                self.column_to_deserialize = tuple(column_to_deserialize.values())
             if column_to_serialize is None:
                 self.column_to_serialize = tuple(system_serialize for i in range(len(columns)))
             else:
-                self.column_to_serialize = column_to_serialize
+                self.column_to_serialize = tuple(column_to_serialize.values())
+        else:
+            self.column_to_deserialize = None
+            self.column_to_serialize = None
         
         
         self.system_serialize = system_serialize
         self.system_deserialize = system_deserialize
-        self.no_columns_serialize = no_columns_serialize
-        self.no_columns_deserialize = no_columns_deserialize
+        self.no_columns_serialize = pkl.dumps
+        self.no_columns_deserialize = pkl.loads
 
         if reopen:
             self.reopen()
@@ -428,7 +485,7 @@ class WFDD(BaseFDD):
             self.file = open(filename, 'wb+')
             self.unfinished_setters = {}
             self.index = {}
-            self.columns = columns
+            self.columns = tuple(columns.keys()) if columns is not None else None
             self.custom_properties = {}
             self.split_to_index = {}
         
@@ -662,7 +719,31 @@ class WFDD(BaseFDD):
         for k in cpy:
             self.unfinished_setters[k].finalize()
 
+        
+        
         index_index = {}
+        has_lambda = False
+        if self.column_def is not None:
+            for k,v in self.column_def.items():
+                if isinstance(v, tuple):
+                    has_lambda = True
+                    break
+        
+        if self.column_def is not None:
+            column_def_start = self.file.tell()
+            if not has_lambda:
+                column_def_data = self.system_serialize(self.column_def)
+            else:
+                # use dill
+                import dill
+                column_def_data = dill.dumps(self.column_def)
+
+            self.file.write(column_def_data)
+            column_def_end = self.file.tell()
+            index_index['_column_def_'] = (column_def_start, column_def_end)
+
+
+
         for k,v in self.custom_properties.items():
             property_start = self.file.tell()
             property_data = self.system_serialize(v)
