@@ -140,15 +140,14 @@ class RFDD(BaseFDD):
         self.file = open(filename, 'rb')
         self.system_deserialize = system_deserialize
         self.no_columns_deserialize = pkl.loads
-        
+        self.column_to_deserialize = None
+        self.columns=None
         
         self.load_indices(split)
 
-
-
-
-        if hasattr(self, 'columns') and not hasattr(self, 'column_to_deserialize'):
-                self.column_to_deserialize = tuple(self.system_deserialize for i in range(len(self.columns)))
+        if self.columns is not None and self.column_to_deserialize is None:
+            self.column_to_deserialize = tuple(self.system_deserialize for i in range(len(self.columns)))
+        
         
         self.custom_properties_cache = {}
         self.read_row_cache = None
