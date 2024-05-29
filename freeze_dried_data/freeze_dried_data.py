@@ -147,8 +147,7 @@ class RFDD(BaseFDD):
 
 
 
-        if self.columns is not None:
-            if not hasattr(self, 'column_to_deserialize'):
+        if hasattr(self, 'columns') and not hasattr(self, 'column_to_deserialize'):
                 self.column_to_deserialize = tuple(self.system_deserialize for i in range(len(self.columns)))
         
         self.custom_properties_cache = {}
