@@ -43,7 +43,7 @@ class TestFDD(unittest.TestCase):
 
     def test_basic_operations_with_columns(self):
         # Write operations
-        with WFDD(self.test_file, columns={'name':'str','area':'float', 'price':'float'}, overwrite=True) as wfdd:
+        with WFDD(self.test_file, columns={'name':'str','area':'any', 'price':'any'}, overwrite=True) as wfdd:
             wfdd['house1'] = {'name': 'house1', 'area': 100, 'price': 100000}
             wfdd['house2'] = {'name': 'house2', 'area': 200, 'price': 200000}
             wfdd['house3'] = ('house3', 300, 300000)
@@ -120,12 +120,12 @@ class TestFDD(unittest.TestCase):
                 pass
 
     def test_modify_and_write(self):
-        with WFDD(self.test_file, columns={'name':'str','area':'float', 'price':'float'}, overwrite=True) as wfdd:
+        with WFDD(self.test_file, columns={'name':'str','area':'any', 'price':'any'}, overwrite=True) as wfdd:
             wfdd['house1'] = {'name': 'house1', 'area': 100, 'price': 100000}
             wfdd['house2'] = {'name': 'house2', 'area': 200, 'price': 200000}
             wfdd['house3'] = ('house3', 300, 300000)
 
-        with WFDD(self.test_file2, columns={'name':'str','area':'float', 'price':'float'}, overwrite=True) as wfdd,\
+        with WFDD(self.test_file2, columns={'name':'str','area':'any', 'price':'any'}, overwrite=True) as wfdd,\
              RFDD(self.test_file) as rfdd:
              for k,v in rfdd.items():
                 v.price = v.price * 1.5
@@ -143,12 +143,12 @@ class TestFDD(unittest.TestCase):
             self.assertEqual(rfdd['house3 with inflation'].price, 450000)
 
     def test_modify_and_write_use_indices(self):
-        with WFDD(self.test_file, columns={'name':'str','area':'float', 'price':'float'}, overwrite=True) as wfdd:
+        with WFDD(self.test_file, columns={'name':'str','area':'any', 'price':'any'}, overwrite=True) as wfdd:
             wfdd['house1'] = {'name': 'house1', 'area': 100, 'price': 100000}
             wfdd['house2'] = {'name': 'house2', 'area': 200, 'price': 200000}
             wfdd['house3'] = ('house3', 300, 300000)
 
-        with WFDD(self.test_file2, columns={'name':'str','area':'float', 'price':'float'}, overwrite=True) as wfdd,\
+        with WFDD(self.test_file2, columns={'name':'str','area':'any', 'price':'any'}, overwrite=True) as wfdd,\
              RFDD(self.test_file) as rfdd:
              for k,v in rfdd.items():
                 v[2] = v[2] * 1.5
@@ -203,7 +203,7 @@ class TestFDD(unittest.TestCase):
             self.assertEqual(dct, {'key1': 'value1', 'key2': 'value2', 'key3': 'value3'})
 
     def test_incomplete_columns(self):
-        with WFDD(self.test_file, columns={'name':'str','area':'float', 'price':'float'}, overwrite=True) as wfdd:
+        with WFDD(self.test_file, columns={'name':'str','area':'any', 'price':'any'}, overwrite=True) as wfdd:
             wfdd['house1'] = {'name': 'house1', 'area': 100}
             wfdd['house2'] = {'name': 'house2', 'price': 200000}
             wfdd['house3'] = ('house3', 300, 300000)
@@ -237,13 +237,13 @@ class TestFDD(unittest.TestCase):
             self.assertEqual(rfdd['key1'].value, 'new_value2')
 
     def test_set_all_of_column(self):
-        with WFDD(self.test_file, columns={'value':'float','area':'float'}, overwrite=True) as wfdd:
+        with WFDD(self.test_file, columns={'value':'any','area':'any'}, overwrite=True) as wfdd:
             for i in range(100):
                 wfdd[f'key{i}'].value = i
                 wfdd[f'key{i}'].area = i+1
         
         with RFDD(self.test_file) as rfdd:
-            with WFDD(self.test_file2, columns={'value':'float','area':'float'}, overwrite=True) as wfdd2:
+            with WFDD(self.test_file2, columns={'value':'any','area':'any'}, overwrite=True) as wfdd2:
                 for k,v in rfdd.items():
                     v.value = v.value * 1.1
                     wfdd2[k] = v
@@ -256,7 +256,7 @@ class TestFDD(unittest.TestCase):
 
 
     def test_set_columns_by_attribute_or_item(self):
-        with WFDD(self.test_file, columns={'name':'str','area':'float', 'price':'float'}, overwrite=True) as wfdd:
+        with WFDD(self.test_file, columns={'name':'str','area':'any', 'price':'any'}, overwrite=True) as wfdd:
             wfdd['house1'].name = 'house1'
             wfdd['house1'].area = 100
             wfdd['house1'].price = 100000
@@ -342,7 +342,7 @@ class TestFDD(unittest.TestCase):
     def test_splits(self):
 
         
-        with WFDD(self.test_file, columns={'name':'str','area':'float', 'price':'float'}, overwrite=True) as wfdd:
+        with WFDD(self.test_file, columns={'name':'str','area':'any', 'price':'any'}, overwrite=True) as wfdd:
             for i in range(100):
                 wfdd[f'house_{i}'] = {'name': f'house_{i}', 'area': 100+10*i, 'price': 1000+100*i}
 
@@ -379,8 +379,7 @@ class TestFDD(unittest.TestCase):
                 self.assertEqual(v.name, f'house_{80+i}')
                 self.assertEqual(v.area, 900+10*i)
                 self.assertEqual(v.price, 9000+100*i)
-
-            rfdd.load_new_split('reverse_order')
+        with RFDD(f"{self.test_file}^reverse_order") as rfdd:
             self.assertEqual(len(list(rfdd.keys())), 100)
             for i, (k,v) in enumerate(rfdd.items()):
                 self.assertEqual(k, f'house_{99-i}')
@@ -422,7 +421,7 @@ class TestFDD(unittest.TestCase):
                 self.assertEqual(rfdd[key], value)
 
     def test_column_not_found(self):
-        with WFDD(self.test_file, columns={'name':'str','area':'float', 'price':'float'}, overwrite=True) as wfdd:
+        with WFDD(self.test_file, columns={'name':'str','area':'any', 'price':'any'}, overwrite=True) as wfdd:
             wfdd['house1'] = {'name': 'house1', 'area': 100, 'price': 100000}
             wfdd['house2'] = {'name': 'house2', 'area': 200, 'price': 200000}
             wfdd['house3'] = ('house3', 300, 300000)
@@ -442,7 +441,7 @@ class TestFDD(unittest.TestCase):
         
     def test_print_finalize_warning(self):
         with self.assertWarns(UserWarning):
-            with WFDD(self.test_file, columns={'name':'str','area':'float', 'price':'float'}, overwrite=True) as wfdd:
+            with WFDD(self.test_file, columns={'name':'str','area':'any', 'price':'any'}, overwrite=True) as wfdd:
                 for i in range(1100):
                     wfdd[f'house_{i}'].name = f'house_{i}' # we only set the name attribute
             # we should get a warning upon exiting the context
@@ -468,7 +467,7 @@ class TestFDD(unittest.TestCase):
                 wfdd['key1'] = 'value2'
             
     def test_invalid_object_for_column_mode(self):
-        with WFDD(self.test_file, columns={'name':'str','area':'float', 'price':'float'}, overwrite=True) as wfdd:
+        with WFDD(self.test_file, columns={'name':'str','area':'any', 'price':'any'}, overwrite=True) as wfdd:
             wfdd['house1'] = {'name': 'house1', 'area': 100, 'price': 100000}
             wfdd['house2'] = {'name': 'house2', 'area': 200, 'price': 200000}
             with self.assertRaises(ValueError):
@@ -492,13 +491,13 @@ class TestFDD(unittest.TestCase):
                 self.location = location
 
 
-        with WFDD(self.test_file, columns={'name':'str','area':'float', 'price':'float'}, overwrite=True) as wfdd:
+        with WFDD(self.test_file, columns={'name':'str','area':'any', 'price':'any'}, overwrite=True) as wfdd:
             wfdd['house1'] = Test('house1', 100, 100000)
             wfdd['house2'] = Test('house2', 200, 200000)
             with self.assertRaises(ValueError):
                 wfdd['house3'] = Test2('house3', 300)
 
-        with WFDD(self.test_file, columns={'name':'str','area':'float', 'price':'float'}, overwrite=True) as wfdd:
+        with WFDD(self.test_file, columns={'name':'str','area':'any', 'price':'any'}, overwrite=True) as wfdd:
             with self.assertRaises(ValueError):
                 wfdd['house1'] = {"happy": "birthday"}
             
@@ -509,7 +508,7 @@ class TestFDD(unittest.TestCase):
         num_records = 1000
         data = {f'key{i}': {'name': f'name{i}', 'area': random.random(), 'price': random.random()} for i in range(num_records)}
         
-        with WFDD(self.test_file, columns={'name':'str','area':'float', 'price':'float'}, overwrite=True) as wfdd:
+        with WFDD(self.test_file, columns={'name':'str','area':'any', 'price':'any'}, overwrite=True) as wfdd:
             for i, (k, v) in enumerate(data.items()):
                 wfdd[k] = v
                 where_read = random.choice(list(data.keys())[:i+1])
@@ -735,7 +734,7 @@ class TestFDD(unittest.TestCase):
 
     def test_reopen_file_with_columns(self):
         data = {f'key{i}': {'name': f'name{i}', 'area': random.random(), 'price': random.random()} for i in range(1000)}
-        with WFDD(self.test_file, columns={'name':'str','area':'float', 'price':'float'}, overwrite=True) as wfdd:
+        with WFDD(self.test_file, columns={'name':'str','area':'any', 'price':'any'}, overwrite=True) as wfdd:
             for k, v in data.items():
                 wfdd[k] = v
 
@@ -756,7 +755,7 @@ class TestFDD(unittest.TestCase):
                 self.assertEqual(v.price, data[f'key{2*i}']['price'])
 
         data_2 = {f'key{i}': {'name': f'name{i}', 'area': random.random(), 'price': random.random()} for i in range(1000,2000)}
-        with WFDD(self.test_file, columns={'name':'str','area':'float', 'price':'float'}, reopen=True) as wfdd:
+        with WFDD(self.test_file, columns={'name':'str','area':'any', 'price':'any'}, reopen=True) as wfdd:
 
             for k, v in data_2.items():
                 wfdd[k] = v
@@ -772,7 +771,7 @@ class TestFDD(unittest.TestCase):
 
 
     def test_columns_with_partial_dicts(self):
-        with WFDD(self.test_file, columns={'name':'str','area':'float', 'price':'float'}, overwrite=True) as wfdd:
+        with WFDD(self.test_file, columns={'name':'str','area':'any', 'price':'any'}, overwrite=True) as wfdd:
             wfdd['house1'] = {'name': 'house1', 'area': 100}
             wfdd['house2'] = {'name': 'house2', 'price': 200000}
 
@@ -786,56 +785,166 @@ class TestFDD(unittest.TestCase):
 
     def test_columns_with_dicts_with_extra_keys(self):
         
-        with WFDD(self.test_file, columns={'name':'str','area':'float', 'price':'float'}, overwrite=True) as wfdd:
+        with WFDD(self.test_file, columns={'name':'str','area':'any', 'price':'any'}, overwrite=True) as wfdd:
             with self.assertRaises(ValueError):
                 wfdd['house1'] = {'name': 'house1', 'area': 100, 'extra': 'extra'}
             with self.assertRaises(ValueError):
                 wfdd['house2'] = {'name': 'house2', 'price': 200000, 'extra': 'extra'}
 
-    def test_get_dict(self):
+    def test_as_dict(self):
         
-        with WFDD(self.test_file, columns={'name':'str','area':'float', 'price':'float'}, overwrite=True) as wfdd:
+        with WFDD(self.test_file, columns={'name':'str','area':'any', 'price':'any'}, overwrite=True) as wfdd:
             wfdd['house1'] = {'name': 'house1', 'area': 100, 'price': 100000}
             wfdd['house2'] = {'name': 'house2', 'area': 200, 'price': 200000}
             wfdd['house3'] = ('house3', 300, 300000)
 
         with RFDD(self.test_file) as rfdd:
-            self.assertEqual(rfdd['house1'].get_dict(), {'name': 'house1', 'area': 100, 'price': 100000})
-            self.assertEqual(rfdd['house2'].get_dict(), {'name': 'house2', 'area': 200, 'price': 200000})
-            self.assertEqual(rfdd['house3'].get_dict(), {'name': 'house3', 'area': 300, 'price': 300000})
+            self.assertEqual(rfdd['house1'].as_dict(), {'name': 'house1', 'area': 100, 'price': 100000})
+            self.assertEqual(rfdd['house2'].as_dict(), {'name': 'house2', 'area': 200, 'price': 200000})
+            self.assertEqual(rfdd['house3'].as_dict(), {'name': 'house3', 'area': 300, 'price': 300000})
 
-    # def test_add_column(self):
+    def test_read_row_features(self):
+        with WFDD(self.test_file, columns={'name':'str','area':'any', 'price':'any'}, overwrite=True) as wfdd:
+            wfdd['house1'] = {'name': 'house1', 'area': 100, 'price': 100000}
+            wfdd['house2'] = {'name': 'house2', 'area': 200, 'price': 200000}
+            wfdd['house3'] = ('house3', 300, 300000)
+
+        with RFDD(self.test_file) as rfdd:
+            self.assertIn('name', rfdd['house1'])
+            for k,v in rfdd['house1'].items():
+                self.assertIn(k, ['name', 'area', 'price'])
+                self.assertIn(v, ['house1', 100, 100000])
+                self.assertIn(k, rfdd['house1'])
+                
+            for k in rfdd['house1']:
+                self.assertIn(k, ['name', 'area', 'price'])
+            for k in rfdd['house1'].keys():
+                self.assertIn(k, ['name', 'area', 'price'])
+            for v in rfdd['house1'].values():
+                self.assertIn(v, ['house1', 100, 100000])
+
+
+
+    def test_alternative_indices(self):
+        for index_type in [(False, False), (True, False), (False, True), (True, True)]:
+            wfdd_dict = {}
+            with WFDD(self.test_file, columns={'name':'str','area':'any', 'price':'any'}, overwrite=True,) as wfdd:
+                for i in range(100):
+                    wfdd[f'house_{i}'] = {'name': f'house_{i}', 'area': 100+10*i, 'price': 1000+100*i}
+                    wfdd_dict[f'house_{i}'] = {'name': f'house_{i}', 'area': 100+10*i, 'price': 1000+100*i}
+
+                wfdd.make_split('odds', [f'house_{i}' for i in range(1,100,2)], keyless=index_type[0], preserve_order=index_type[1])
+                wfdd.make_split('evens', [f'house_{i}' for i in range(0,100,2)], keyless=index_type[0], preserve_order=index_type[1])
+                wfdd.make_split('big houses', [f'house_{i}' for i in range(80,100)], keyless=index_type[0], preserve_order=index_type[1])
+                wfdd.make_split('reverse_order', [f'house_{i}' for i in range(99,-1,-1)], keyless=index_type[0], preserve_order=index_type[1])
+                wfdd.make_split('all_rows', wfdd.keys(), overwrite=True, keyless=index_type[0], preserve_order=index_type[1])
+                with self.assertRaises(ValueError):
+                    wfdd.make_split('odds', [f'house_{i}' for i in range(1,100,2)], keyless=index_type[0], preserve_order=index_type[1])
+                with self.assertRaises(ValueError):
+                    wfdd.make_split('wrong', 'not_a_list', keyless=index_type[0], preserve_order=index_type[1])
+
+
+            with RFDD(self.test_file, split='all_rows') as rfdd:
+                self.assertEqual(len(list(rfdd.keys())), 100)
+                self.assertEqual(rfdd.get_available_splits(), ['odds', 'evens', 'big houses', 'reverse_order', 'all_rows'])
+
+                for i, (k,v) in enumerate(rfdd.items()):
+                    if index_type[0] == False:# keyless
+                        self.assertIn(k, wfdd_dict)
+                    if index_type[1] == True:# preserve_order
+                        
+                        self.assertEqual(v.name, f'house_{i}')
+                        self.assertEqual(v.area, 100+10*i)
+                        self.assertEqual(v.price, 1000+100*i)
+                    else:
+                        self.assertIn(v.as_dict(), wfdd_dict.values())
+                            
+                
+                rfdd.load_new_split('odds')
+                for i, (k,v) in enumerate(rfdd.items()):
+                    if index_type[0] == False:# keyless
+                        self.assertIn(k, wfdd_dict)
+                    if index_type[1] == True:# preserve_order
+                        self.assertEqual(v.name, f'house_{i*2+1}')
+                        self.assertEqual(v.area, 110+20*i)
+                        self.assertEqual(v.price, 1100+200*i)
+                    else:
+                        self.assertIn(v.as_dict(), wfdd_dict.values())
+                        
+                    
+
+                rfdd.load_new_split('evens')
+                self.assertEqual(len(list(rfdd.keys())), 50)
+                for i, (k,v) in enumerate(rfdd.items()):
+                    if index_type[0] == False:# keyless
+                        self.assertIn(k, wfdd_dict)
+                    if index_type[1] == True:# preserve_order
+                        self.assertEqual(v.name, f'house_{2*i}')
+                        self.assertEqual(v.area, 100+20*i)
+                        self.assertEqual(v.price, 1000+200*i)
+                    else:
+                        self.assertIn(v.as_dict(), wfdd_dict.values())
+
+                        
+                    
+
+                rfdd.load_new_split('big houses')
+                self.assertEqual(len(list(rfdd.keys())), 20)
+                for i, (k,v) in enumerate(rfdd.items()):
+                    if index_type[0] == False:# keyless
+                        self.assertIn(k, wfdd_dict)
+                    if index_type[1] == True:# preserve_order
+                        self.assertEqual(v.name, f'house_{80+i}')
+                        self.assertEqual(v.area, 900+10*i)
+                        self.assertEqual(v.price, 9000+100*i)
+                    else:
+                        self.assertIn(v.as_dict(), wfdd_dict.values())
+                        
+                    
+
+                rfdd.load_new_split('reverse_order')
+                self.assertEqual(len(list(rfdd.keys())), 100)
+                for i, (k,v) in enumerate(rfdd.items()):
+                    if index_type[0] == False:# keyless
+                        self.assertIn(k, wfdd_dict)
+                    if index_type[1] == True:# preserve_order
+                        self.assertEqual(v.name, f'house_{99-i}')
+                        self.assertEqual(v.area, 1090-10*i)
+                        self.assertEqual(v.price, 10900-100*i)
+                    else:
+                        self.assertIn(v.as_dict(), wfdd_dict.values())
+                        
+    def test_add_column(self):
+        with WFDD(self.test_file, columns={'name':'str','area':'any'}, overwrite=True) as wfdd:
+            for i in range(100):
+                wfdd[f'house_{i}'] = {'name': f'house_{i}', 'area': 100+10*i}
+
+            wfdd.custom_attribute1 = 'custom1'
+
+            wfdd.make_split('evens', [f'house_{i}' for i in range(0,100,2)])
+
+        new_col = {}
+        for i in range(100):
+            new_col[f'house_{i}'] = 1000+100*i
         
-    #     with WFDD(self.test_file, columns={'name':'str','area':'float'}, overwrite=True) as wfdd:
-    #         for i in range(100):
-    #             wfdd[f'house_{i}'] = {'name': f'house_{i}', 'area': 100+10*i}
-
-    #         wfdd.custom_attribute1 = 'custom1'
-
-    #         wfdd.make_split('evens', [f'house_{i}' for i in range(0,100,2)])
-
-    #     new_col = {}
-    #     for i in range(100):
-    #         new_col[f'house_{i}'] = 1000+100*i
         
-        
-    #     if os.path.exists(self.test_file3):
-    #         os.remove(self.test_file3)
+        if os.path.exists(self.test_file3):
+            os.remove(self.test_file3)
 
-    #     add_column(self.test_file, self.test_file3, 'price', new_col)
+        add_column(self.test_file, self.test_file3, 'price', new_col)
 
-    #     with RFDD(self.test_file3) as rfdd:
-    #         for i in range(100):
-    #             self.assertEqual(rfdd[f'house_{i}'].price, 1000+100*i)
+        with RFDD(self.test_file3) as rfdd:
+            for i in range(100):
+                self.assertEqual(rfdd[f'house_{i}'].price, 1000+100*i)
 
-    #         rfdd.load_new_split('evens')
-    #         for i in range(50):
-    #             self.assertEqual(rfdd[f'house_{2*i}'].price, 1000+200*i)
+            rfdd.load_new_split('evens')
+            for i in range(50):
+                self.assertEqual(rfdd[f'house_{2*i}'].price, 1000+200*i)
 
-    #         self.assertEqual(rfdd.custom_attribute1, 'custom1')
+            self.assertEqual(rfdd.custom_attribute1, 'custom1')
 
-    #     with self.assertRaises(ValueError):
-    #         add_column(self.test_file3, self.test_file4, 'price', new_col)
+        with self.assertRaises(ValueError):
+            add_column(self.test_file3, self.test_file4, 'price', new_col)
 
             
 
@@ -875,7 +984,7 @@ class TestFDD(unittest.TestCase):
         num_records = 100000
         data = {f'key{i}': {'name': f'name{i}', 'area': random.random(), 'price': random.random()} for i in range(num_records)}
         
-        with WFDD(self.test_file, columns={'name':'str','area':'float', 'price':'float'}, overwrite=True) as wfdd:
+        with WFDD(self.test_file, columns={'name':'str','area':'any', 'price':'any'}, overwrite=True) as wfdd:
             for k, v in data.items():
                 wfdd[k] = v
 

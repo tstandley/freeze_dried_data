@@ -1,6 +1,6 @@
 import pickle as pkl
 import os
-from typing import Any, Dict, Iterator, Tuple, Optional, Union, List
+from typing import Any, Dict, Iterator, Tuple, Optional, Union, List, Iterable
 import sys
 import warnings
 import zlib
@@ -9,13 +9,6 @@ try:
     from .efficient_index import FDDIndexKeyless, FDDIndexComparableKey, FDDIntList, FDDIndexGeneral, FDDIndexBase
 except ImportError:
     from efficient_index import FDDIndexKeyless, FDDIndexComparableKey, FDDIntList, FDDIndexGeneral, FDDIndexBase
-
-
-# data is stored in the following format:
-# [record, record, ..., record], [custom_property, custom_property, ..., custom_property], [split, split, ..., split], [columns], index_index, 8 bytes for index_index length
-
-
-
 
 type_to_serializer = {
     'any': pkl.dumps,
@@ -28,9 +21,7 @@ type_to_serializer = {
     'int32': lambda x: x.to_bytes(4, 'little'),
     'int16': lambda x: x.to_bytes(2, 'little'),
     'int8': lambda x: x.to_bytes(1, 'little'),
-    'numpy': pkl.dumps,
     'torch': lambda x: pkl.dumps(x.cpu().numpy()),
-    'float': pkl.dumps
 }
 
 type_to_deserializer = {
@@ -44,13 +35,8 @@ type_to_deserializer = {
     'int32': lambda x: int.from_bytes(x, 'little'),
     'int16': lambda x: int.from_bytes(x, 'little'),
     'int8': lambda x: int.from_bytes(x, 'little'),
-    'numpy': pkl.loads,
     'torch': lambda x: torch.from_numpy(pkl.loads(x)),
-    'float': pkl.loads
 }
-
-
-
 
 class BaseFDD:
     """
@@ -121,7 +107,6 @@ class BaseFDD:
             self.file.close()
 
 
-
 class RFDD(BaseFDD):
     """
     RFDD (Freeze Dried Data Reader) class for reading freeze-dried data files.
@@ -136,6 +121,8 @@ class RFDD(BaseFDD):
                  filename: str,
                  split: str = 'all_rows',
                  system_deserialize: callable = pkl.loads) -> None:
+        if '^' in filename:
+            filename, split = filename.split('^')
         super().__init__(filename)
         self.file = open(filename, 'rb')
         self.system_deserialize = system_deserialize
@@ -191,16 +178,13 @@ class RFDD(BaseFDD):
         
         if key not in self.index:
             if isinstance(key, tuple):
-                if key in self.index:
-                    return self[key]
-                else:
-                    if key[0] in self.index:
-                        indices = self.index[key[0]]
-                        col_index = self.columns[key[1]]
-                        start = indices[col_index]
-                        end = indices[col_index+1]
-                        data = self.read_chunk(start, end)
-                        return self.column_to_deserialize[col_index](data)
+                if key[0] in self.index:
+                    indices = self.index[key[0]]
+                    col_index = self.columns[key[1]]
+                    start = indices[col_index]
+                    end = indices[col_index+1]
+                    data = self.read_chunk(start, end)
+                    return self.column_to_deserialize[col_index](data)
             else:
                 raise KeyError("Key not found.", key, self.index.keys())
         
@@ -333,7 +317,7 @@ class FDDReadRow:
         self._fdd_row_parent = parent
         self._fdd_row_cache = [None for _ in range(len(self._fdd_row_index) - 1)]
 
-    def get_dict(self):
+    def as_dict(self):
         """
         :return: A dictionary representation of the row.
         """
@@ -411,6 +395,54 @@ class FDDReadRow:
         
         index = columns[name] if isinstance(columns, dict) else columns.index(name)
         self._fdd_row_cache[index] = value
+
+    def __contains__(self, key: str) -> bool:
+        """
+        Checks if the row contains the specified column.
+
+        :param key: The name of the column.
+        :return: True if the column is found, False otherwise.
+        """
+        return key in self._fdd_row_parent.columns
+    
+    def __iter__(self) -> Iterator[Any]:
+        """
+        Yields the values for the row.
+        """
+        for i, key in enumerate(self._fdd_row_parent.columns):
+            yield key
+    
+    def __hasattr__(self, name: str) -> bool:
+        """
+        Checks if the row contains the specified column.
+
+        :param name: The name of the column.
+        :return: True if the column is found, False otherwise.
+        """
+        return name in self._fdd_row_parent.columns
+    
+    def items(self) -> Iterator[Tuple[str, Any]]:
+        """
+        Yields (column name, value) pairs for the row.
+        """
+        for i, key in enumerate(self._fdd_row_parent.columns):
+            yield key, self[i]
+
+    def keys(self) -> Iterator[str]:
+        """
+        Yields the column names for the row.
+        """
+        for key in self._fdd_row_parent.columns:
+            yield key
+    
+    def values(self) -> Iterator[Any]:
+        """
+        Yields the values for the row.
+        """
+        for i, key in enumerate(self._fdd_row_parent.columns):
+            yield self[i]
+
+    
     
     def __repr__(self) -> str:
         """
@@ -421,8 +453,6 @@ class FDDReadRow:
             value = self[i]
             rep += f"{key}: {value}\n"
         return rep
-
-
 
 class WFDD(BaseFDD):
     """
@@ -447,7 +477,6 @@ class WFDD(BaseFDD):
                  reopen: bool = False,
                  system_serialize: callable = pkl.dumps,
                  system_deserialize: callable = pkl.loads,
-                 preserve_order=True,
                  ) -> None:
         self.__dict__['_initializing'] = True # Use self.__dict__ to bypass __setattr__
         super().__init__(filename)
@@ -465,14 +494,8 @@ class WFDD(BaseFDD):
         self.column_def = columns
 
         if columns is not None:
-            if column_to_deserialize is None:
-                self.column_to_deserialize = tuple(pkl.loads for i in range(len(columns)))
-            else:
-                self.column_to_deserialize = tuple(column_to_deserialize.values())
-            if column_to_serialize is None:
-                self.column_to_serialize = tuple(system_serialize for i in range(len(columns)))
-            else:
-                self.column_to_serialize = tuple(column_to_serialize.values())
+            self.column_to_deserialize = tuple(column_to_deserialize.values())
+            self.column_to_serialize = tuple(column_to_serialize.values())
         else:
             self.column_to_deserialize = None
             self.column_to_serialize = None
@@ -482,7 +505,6 @@ class WFDD(BaseFDD):
         self.system_deserialize = system_deserialize
         self.no_columns_serialize = pkl.dumps
         self.no_columns_deserialize = pkl.loads
-        self.preserve_order = preserve_order
 
         if reopen:
             self.reopen()
@@ -614,7 +636,7 @@ class WFDD(BaseFDD):
             
         self.index[key] = tuple(positions)    
 
-    def make_split(self, split: str, rows: list | tuple | set | frozenset, overwrite=False, keyless=False) -> None:
+    def make_split(self, split: str, rows: Iterable, overwrite=False, keyless=False, preserve_order=True) -> None:
         """
         Create a split in the WFDD.
 
@@ -624,7 +646,7 @@ class WFDD(BaseFDD):
         if split in self.split_to_index and not overwrite:
             raise ValueError("Split already exists.", split, 'Use overwrite=True to overwrite it.')
         
-        if isinstance(rows, (list, tuple, set, frozenset)):
+        if not isinstance(rows, str):
             
             if keyless:
                 split_index = FDDIndexKeyless(num_vals=len(self.columns)+1 if self.columns is not None else 2)
@@ -633,7 +655,7 @@ class WFDD(BaseFDD):
             else:
                 split_index_dict = {key: self.index[key] for key in rows}
                 try:
-                    if not self.preserve_order:
+                    if not preserve_order:
                         split_index = FDDIndexComparableKey(split_index_dict)
                     else:
                         raise ValueError("dummy error go to except block")
@@ -704,8 +726,6 @@ class WFDD(BaseFDD):
 
             self.columns = self.system_deserialize(self.read_chunk(columns_start, columns_end))
             
-                
-
         self.custom_properties = {k[6:]:v for k,v in index_index.items() if k.startswith('_prop_')}
         
         # need to figure out where to seek so that we are at the end of the rows. Everything else shoudl be in ram.
@@ -744,8 +764,6 @@ class WFDD(BaseFDD):
         for k in cpy:
             self.unfinished_setters[k].finalize()
 
-        
-        
         index_index = {}
         has_lambda = False
         if self.column_def is not None:
@@ -775,15 +793,6 @@ class WFDD(BaseFDD):
             self.file.write(property_data)
             property_end = self.file.tell()
             index_index["_prop_"+k] = (property_start, property_end)
-
-        if not isinstance(self.index, FDDIndexKeyless):
-            try:
-                if not self.preserve_order:
-                    self.index = FDDIndexComparableKey(self.index)
-            except:
-                pass
-        
-        
 
         self.split_to_index['all_rows'] = self.index
         for k,v in self.split_to_index.items():
@@ -864,7 +873,7 @@ class FDDSetter:
         self.__setattr__(key, value)
 
 
-def add_column(input_path, output_path, column_name, column_data, overwrite=False, column_serialize=pkl.dumps):
+def add_column(input_path, output_path, column_name, column_data, overwrite=False, column_type='any'):
     """
     Add a column to a freeze-dried data file.
 
@@ -881,9 +890,14 @@ def add_column(input_path, output_path, column_name, column_data, overwrite=Fals
     with RFDD(input_path) as rfdd:
         if column_name in rfdd.columns:
             raise ValueError("Column already exists.", column_name)
+        
+        column_def = rfdd.column_def
+        column_def[column_name] = column_type
 
-        new_columns = list(rfdd.columns) + [column_name]
-        with WFDD(output_path, columns=new_columns, overwrite=overwrite) as wfdd:
+        column_serialize = type_to_serializer[column_type]
+
+        
+        with WFDD(output_path, columns=column_def, overwrite=overwrite) as wfdd:
             
             for key, value in column_data:
                 row_index = rfdd.index[key]
