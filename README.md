@@ -29,12 +29,18 @@ Define custom splits in your dataset by storing a list of keys for each split. T
 
 If you key by hash, storing your train, val, and test sets in the same file can reduce the chance of having train/test or train/val overlap.
 
-Custom Splits also maintain order. This makes it easy to compare a ciriculum with random training for example.
+Custom Splits can also maintain order. This makes it easy to compare a ciriculum with random training for example.
 
 Splits also take the place of sharding in many cases. With one split per shard, only the index for the selected split is stored in memory. Everything else can remain on disk. And everything can still remain in a single file.
 
+Splits can be loaded as part of the path with the ^ separator. This allows flags for which file to load to also specify which split.
+
+Using the + signifier in the split specificaiton, the union of two or more splits can be loaded (i.e. split='train+val' will load the union of the train and val splits)
+
 ### Custom Serialization and Deserialization
 FDD allows custom functions for serializing and deserializing data. This flexibility is especially useful when dealing with complex data types or when performance optimizations are necessary. It also allows on-the-fly compression where the compression algorithm can be chosen on a per-column basis. Finally, custom serialization can be much more efficient when storing tensors (numpy, pytorch, etc.)
+
+Custom serializers/deserializers are stored with ```dill``` in the `.fdd` file so that they do not have to be respecified when loaded.
 
 ### Custom Properties
 Custom properties are a great place to store dataset metadata such as dataset cards or the code/parameters used to generate the data. In read mode, properties are loaded from disk only when accessed, so this need not incur a runtime cost.
@@ -104,7 +110,7 @@ with RFDD('new dataset.fdd'):
 from freeze_dried_data import WFDD
 
 # Create a new FDD file with columns for 'text' and 'label'
-with WFDD('text_dataset.fdd', columns=['text', 'label']) as dataset:
+with WFDD('text_dataset.fdd', columns={'text':'str', 'label':'int16'}) as dataset:
     dataset['doc1'] = {'text': 'This is an example document.', 'label': 1}
     dataset['doc2'] = {'text': 'Another document for classification.', 'label': 0}
 
@@ -131,7 +137,7 @@ with WFDD('text_dataset.fdd', columns=['text', 'label']) as dataset:
 from freeze_dried_data import RFDD
 
 with RFDD('text_dataset.fdd') as dataset:
-    print(dataset.columns)
+    print(dataset.column_def)
     for key, row in dataset.items():
         print(row['text'], row['label'])
         # or
@@ -140,7 +146,7 @@ with RFDD('text_dataset.fdd') as dataset:
         print(row[0], row[1])
 
 # output:
-# ['text', 'label']
+# {'text':'str', 'label':'int16'}
 # This is an example document. 1
 # This is an example document. 1
 # This is an example document. 1
@@ -164,7 +170,7 @@ with RFDD('text_dataset.fdd') as dataset:
 
 ### Example 5: Using Custom Properties and Custom Splits
 ```python
-from freeze_dried_data import WFDD
+from freeze_dried_data import WFDD, RFDD
 
 # Open a new FDD file, adding custom properties to store additional metadata
 with WFDD('dataset_with_properties.fdd') as dataset:
@@ -178,8 +184,10 @@ with WFDD('dataset_with_properties.fdd') as dataset:
     dataset['key3'] = 'train_data3'
     dataset['key4'] = 'val_data1'
     dataset['key5'] = 'val_data2'
+    dataset['key6'] = 'test_data1'
     dataset.make_split('train', ['key1', 'key2', 'key3'])
     dataset.make_split('val', ['key4', 'key5'])
+    dataset.make_split('test', ['key6'])
 
 
 # Verify and print custom properties
@@ -190,10 +198,27 @@ with RFDD('dataset_with_properties.fdd', split='train') as loaded_dataset:
     # train rows loaded into the index
     dataset.load_new_split('val')
     # val rows loaded into the index
+    dataset.load_new_split('test')
+    # test rows loaded into the index
 
 ```
+### Example 6: Split union and split as part of filename
+```python
+from freeze_dried_data import WFDD, RFDD
+with RFDD('dataset_with_properties.fdd^train') as loaded_dataset:
+    pass # loads the training split only
 
-### Example 6: Using custom Serialization
+with RFDD('dataset_with_properties.fdd^train+val') as loaded_dataset:
+    pass # loads the union of the train and val sets
+
+with RFDD('dataset_with_properties.fdd' split='train+val') as loaded_dataset:
+    pass # also loads the union of the train and val sets
+
+with RFDD('dataset_with_properties.fdd') as loaded_dataset:
+    pass # loads all rows
+```
+
+### Example 7: Using custom Serialization
 ```python
 import json
 from freeze_dried_data import WFDD
@@ -204,10 +229,11 @@ def my_serializer(obj):
 def my_deserializer(data):
     return json.loads(data.decode('utf-8'))
 
-with WFDD('custom_data.fdd', system_serialize=my_serializer, system_deserialize=my_deserializer) as dataset:
+# custom serializers and deserializers are saved in the .fdd with dill and loaded in the RFDD
+with WFDD('custom_data.fdd', columns={'data': (my_serializer, my_deserializer)}) as dataset:
     dataset['key1'] = {'complex_data': [1, 2, 3]} 
 
-with RFDD('custom_data.fdd', system_deserialize=my_deserializer) as dataset:
+with RFDD('custom_data.fdd') as dataset:
     print(dataset['key1'])
 
 # outputs:
@@ -215,7 +241,7 @@ with RFDD('custom_data.fdd', system_deserialize=my_deserializer) as dataset:
 
 ```
 
-### Example 7: File Reopening
+### Example 8: File Reopening
 ```python
 data = {f'key{i}': f'value{i}' for i in range(1000)}
 with WFDD('test_file.fdd', overwrite=True) as wfdd:
@@ -240,7 +266,7 @@ with WFDD('test_file.fdd', reopen=True) as wfdd:
 # test_file.fdd now contains all 2k rows, both full splits, and all three attributes.
 ```
 
-### Example 8: Using in a PyTorch DataLoader with Workers
+### Example 9: Using in a PyTorch DataLoader with Workers
 ```python
 import torch
 from torch.utils.data import Dataset, DataLoader

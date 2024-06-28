@@ -114,7 +114,6 @@ class RFDD(BaseFDD):
     :param filename: The path to the freeze-dried data file.
     :param split: The split name to load, defaults to the all rows split.
     :param system_deserialize: The function to use for deserializing the index, splits, and columns.
-    :param column_to_deserialize: A tuple of functions to use for deserializing columns. There must be
         one function for each column.
     """
     def __init__(self,
@@ -215,17 +214,50 @@ class RFDD(BaseFDD):
         self.file.seek(start)
         return self.file.read(end - start)
     
+    def _get_split_object(self, split: str) -> FDDIndexBase:
+        if split in self.split_to_index:
+            start, end = self.split_to_index[split]
+            return self.system_deserialize(self.read_chunk(start, end))
+        else:
+            raise KeyError("Split not found.", split)
+        
     def load_new_split(self, split: str) -> None:
         """
         Loads a new split from the file.
 
         :param split: The name of the split to load.
         """
-        if split not in self.split_to_index:
-            raise KeyError("Split not found.", split)
-        
-        start, end = self.split_to_index[split]
-        self.index = self.system_deserialize(self.read_chunk(start, end))
+
+        if '+' in split:
+            splits= split.split('+')
+            split_objects = [self._get_split_object(s) for s in splits]
+            # make sure they're all the same type
+            if not all(type(s) == type(split_objects[0]) for s in split_objects):
+                raise ValueError("All splits must be of the same type.")
+            if type(split_objects[0]) == FDDIndexComparableKey:
+                dct = {}
+                for s in split_objects:
+                    for k,v in s.items():
+                        dct[k] = v
+                self.index = FDDIndexComparableKey(dct)
+            elif type(split_objects[0]) == FDDIndexGeneral:
+                self.index = split_objects[0]
+                for s in split_objects[1:]:
+                    for k,v in s.items():
+                        self.index[k] = v
+
+            elif type(split_objects[0]) == FDDIndexKeyless:
+                rows = {}
+                for s in split_objects:
+                    for v in s.values():
+                        rows[tuple([i for i in v])] = True
+                self.index = FDDIndexKeyless(split_objects[0].num_vals, split_objects[0].byte_width)
+                for i,r in enumerate(rows.keys()):
+                    # print(i,r, len(self.index.buffer), len(self.index))
+                    # print(len(self.index.buffer), self.index.byte_width,self.index.num_vals)
+                    self.index[i] = r
+        else:
+            self.index = self._get_split_object(split)
 
     def get_available_splits(self) -> List[str]:
         """
@@ -254,9 +286,10 @@ class RFDD(BaseFDD):
         for k in self.split_to_index:
             index_index.pop('_split_'+k)
 
-        index_start, index_end = self.split_to_index[split]
+        # index_start, index_end = self.split_to_index[split]
         
-        self.index = self.system_deserialize(self.read_chunk(index_start, index_end))
+        # self.index = self.system_deserialize(self.read_chunk(index_start, index_end))
+        self.load_new_split(split)
         
         if '_columns_' not in index_index:
             self.columns = None
@@ -461,13 +494,9 @@ class WFDD(BaseFDD):
     :param filename: The path to the freeze-dried data file.
     :param columns: The column names for the data. If None, columns won't be used to store the data.
     :param overwrite: Whether to overwrite an existing file, default is False.
+    :param reopen: Whether to reopen an existing file, default is False.
     :param system_serialize: The function to use for serializing the index, splits, and columns.
-    :param no_columns_serialize: The function to use for serializing rows when there are no columns.
-    :param column_to_serialize: A tuple of functions to use for serializing columns. There must be
-        one function for each column. If None, the system serializer is used.
-    :param column_to_deserialize: A tuple of functions to use for deserializing columns. There must be
-        one function for each column. If None, the system deserializer is used. This is only necessary
-        when reading back data that was written with a custom serializer.
+    
 
     """
     def __init__(self,

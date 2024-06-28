@@ -390,6 +390,79 @@ class TestFDD(unittest.TestCase):
             with self.assertRaises(KeyError):
                 rfdd.load_new_split('wrong')
 
+    def test_split_operations(self):
+
+        for index_type in [(False, False), (True, False), (False, True), (True, True)]:
+            with WFDD(self.test_file, columns={'name':'str','area':'any', 'price':'any'}, overwrite=True) as wfdd:
+                for i in range(100):
+                    wfdd[f'house_{i}'] = {'name': f'house_{i}', 'area': 100+10*i, 'price': 1000+100*i}
+
+                wfdd.make_split('odds', [f'house_{i}' for i in range(1,100,2)], keyless=index_type[0], preserve_order=index_type[1])
+                wfdd.make_split('evens', [f'house_{i}' for i in range(0,100,2)], keyless=index_type[0], preserve_order=index_type[1])
+                wfdd.make_split('big houses', [f'house_{i}' for i in range(80,100)], keyless=index_type[0], preserve_order=index_type[1])
+                
+            with RFDD(self.test_file, split='odds+evens') as rfdd:
+                self.assertEqual(len(list(rfdd.keys())), 100)
+                for k,v in rfdd.items():
+                    i = int(v.name.split('_')[-1])
+                    if not index_type[0]:
+                        self.assertEqual(k, f'house_{i}')
+                    self.assertEqual(v.name, f'house_{i}')
+                    self.assertEqual(v.area, 100+10*i)
+                    self.assertEqual(v.price, 1000+100*i)
+
+            with RFDD(self.test_file, split='odds+big houses') as rfdd:
+                self.assertEqual(len(list(rfdd.keys())), 60)
+                for k,v in rfdd.items():
+                    i = int(v.name.split('_')[-1])
+                    if not index_type[0]:
+                        self.assertEqual(k, f'house_{i}')
+                    self.assertEqual(v.name, f'house_{i}')
+                    self.assertEqual(v.area, 100+10*i)
+                    self.assertEqual(v.price, 1000+100*i)
+
+            with RFDD(self.test_file, split='odds+evens+big houses') as rfdd:
+                self.assertEqual(len(list(rfdd.keys())), 100)
+                for k,v in rfdd.items():
+                    i = int(v.name.split('_')[-1])
+                    if not index_type[0]:
+                        self.assertEqual(k, f'house_{i}')
+                    
+                    self.assertEqual(v.name, f'house_{i}')
+                    self.assertEqual(v.area, 100+10*i)
+                    self.assertEqual(v.price, 1000+100*i)
+
+            with RFDD(self.test_file, split='evens+odds') as rfdd:
+                self.assertEqual(len(list(rfdd.keys())), 100)
+                for k,v in rfdd.items():
+                    i = int(v.name.split('_')[-1])
+                    if not index_type[0]:
+                        self.assertEqual(k, f'house_{i}')
+                    self.assertEqual(v.name, f'house_{i}')
+                    self.assertEqual(v.area, 100+10*i)
+                    self.assertEqual(v.price, 1000+100*i)
+
+            with RFDD(self.test_file, split='big houses+odds') as rfdd:
+                self.assertEqual(len(list(rfdd.keys())), 60)
+                for k,v in rfdd.items():
+                    i = int(v.name.split('_')[-1])
+                    if not index_type[0]:
+                        self.assertEqual(k, f'house_{i}')
+                    self.assertEqual(v.name, f'house_{i}')
+                    self.assertEqual(v.area, 100+10*i)
+                    self.assertEqual(v.price, 1000+100*i)
+
+            with RFDD(self.test_file, split='big houses+evens+odds') as rfdd:
+                self.assertEqual(len(list(rfdd.keys())), 100)
+                for k,v in rfdd.items():
+                    i = int(v.name.split('_')[-1])
+                    if not index_type[0]:
+                        self.assertEqual(k, f'house_{i}')
+                    
+                    self.assertEqual(v.name, f'house_{i}')
+                    self.assertEqual(v.area, 100+10*i)
+                    self.assertEqual(v.price, 1000+100*i)
+                
 
 
     def test_large_data_handling(self):
