@@ -57,6 +57,10 @@ class BaseFDD:
     
     def keys(self) -> Iterator[Any]:
         return self.index.keys()
+    
+    def __iter__(self):
+        for k in self.keys():
+            yield k, self[k]
 
     def items(self) -> Iterator[Tuple[Any, 'FDDReadRow']]:
         """ Yield (key, value) pairs, with length awareness for tqdm compatibility. """
@@ -185,7 +189,11 @@ class RFDD(BaseFDD):
                     data = self.read_chunk(start, end)
                     return self.column_to_deserialize[col_index](data)
             else:
-                raise KeyError("Key not found.", key, self.index.keys())
+                if len(self.index.keys()) < 50:
+                    raise KeyError("Key not found.", key, self.index.keys())
+                else:
+                    raise KeyError("Key not found.", key, len(self.index.keys()))
+
         
         if self.columns is None:
             
@@ -355,6 +363,9 @@ class FDDReadRow:
         :return: A dictionary representation of the row.
         """
         return {k: self[i] for i, k in enumerate(self._fdd_row_parent.columns)}
+    
+    def dict(self):
+        return self.as_dict()
     
     def __getitem__(self, key: int | str) -> Any:
         """

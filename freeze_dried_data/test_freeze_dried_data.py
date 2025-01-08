@@ -104,6 +104,26 @@ class TestFDD(unittest.TestCase):
             # price: 300000
 
 
+    def test_in_behavior(self):
+        # Write operations
+        with WFDD(self.test_file, columns={'name':'str','area':'any', 'price':'any'}, overwrite=True) as wfdd:
+            wfdd['house1'] = {'name': 'house1', 'area': 100, 'price': 100000}
+            wfdd['house2'] = {'name': 'house2', 'area': 200, 'price': 200000}
+            wfdd['house3'] = ('house3', 300, 300000)
+
+        with RFDD(self.test_file) as rfdd:
+            dct = {}
+            for key, row in rfdd:
+                dct[key]=row
+
+            self.assertEqual(dct['house1'].as_dict(), {'name': 'house1', 'area': 100, 'price': 100000})
+            self.assertEqual(dct['house2'].as_dict(), {'name': 'house2', 'area': 200, 'price': 200000})
+            self.assertEqual(dct['house3'].as_dict(), {'name': 'house3', 'area': 300, 'price': 300000})
+
+
+        
+
+
     def test_file_exists(self):
         with WFDD(self.test_file, overwrite=True) as wfdd:
             wfdd['hello'] = 'world'
