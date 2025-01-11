@@ -5,10 +5,12 @@ import sys
 import warnings
 import zlib
 import torch
+
 try:
-    from .efficient_index import FDDIndexKeyless, FDDIndexComparableKey, FDDIntList, FDDIndexGeneral, FDDIndexBase
+    from .efficient_index import FDDIndexKeyless, FDDIndexComparableKey, FDDIntList, FDDIndexGeneral, FDDIndexBase,FDDOnDiskIndex
 except ImportError:
-    from efficient_index import FDDIndexKeyless, FDDIndexComparableKey, FDDIntList, FDDIndexGeneral, FDDIndexBase
+    from efficient_index import FDDIndexKeyless, FDDIndexComparableKey, FDDIntList, FDDIndexGeneral, FDDIndexBase,FDDOnDiskIndex
+     
 
 type_to_serializer = {
     'any': pkl.dumps,
@@ -111,7 +113,8 @@ class BaseFDD:
             self.file.close()
 
 
-class RFDD(BaseFDD):
+
+class RFDDImpl(BaseFDD):
     """
     RFDD (Freeze Dried Data Reader) class for reading freeze-dried data files.
 
@@ -124,6 +127,9 @@ class RFDD(BaseFDD):
                  filename: str,
                  split: str = 'all_rows',
                  system_deserialize: callable = pkl.loads) -> None:
+        
+
+
         if '^' in filename:
             filename, split = filename.split('^')
         super().__init__(filename)
@@ -132,8 +138,7 @@ class RFDD(BaseFDD):
         self.no_columns_deserialize = pkl.loads
         self.column_to_deserialize = None
         self.columns=None
-        
-        self.load_indices(split)
+
 
         if self.columns is not None and self.column_to_deserialize is None:
             self.column_to_deserialize = tuple(self.system_deserialize for i in range(len(self.columns)))
@@ -143,6 +148,7 @@ class RFDD(BaseFDD):
         self.read_row_cache = None
         self.cashed_read_row_key = None
 
+        self.load_indices(split)
         os.register_at_fork(after_in_child=self._after_fork)
 
     def _after_fork(self) -> None:
@@ -225,9 +231,53 @@ class RFDD(BaseFDD):
     def _get_split_object(self, split: str) -> FDDIndexBase:
         if split in self.split_to_index:
             start, end = self.split_to_index[split]
-            return self.system_deserialize(self.read_chunk(start, end))
+
+            
+            self.file.seek(start)
+            byte = self.file.read(1)
+            if byte==b'\01': # this is a keyless split
+                return FDDOnDiskIndex(self.file,start+1)
+            else:
+                return self.system_deserialize(self.read_chunk(start, end))
+
+
         else:
             raise KeyError("Split not found.", split)
+        
+    def load_keys(self, row_to_key: callable, filter_function: callable=lambda x:True) -> None:
+        """
+        Compute keys of each row and set index to reflect computed keys
+
+        :param row_to_key: Function used to compute keys
+        :param filter_function: Function to filter. The function takes an FDDReadRow and returns a boolean (true if the row should be kept)
+        """
+        new_index = FDDIndexGeneral(self.index.num_vals, self.index.byte_width)
+
+        for k,v in self:
+            if not filter_function(v):
+                continue
+            if row_to_key:
+                new_key = row_to_key(v)
+            else:
+                new_key = k
+
+            if new_key in new_index:
+                warnings.warn(f'redundant key computed by row_to_key {new_key}, new value:{v}. Skipping new row.')
+            else:
+                new_index[new_key]=self.index[k]
+
+        self.index = new_index
+
+    def filter(self, filter_function: callable, row_to_key: callable=None) -> None:
+
+        """
+        Filter rows of an FDD. Optionally also load keys using the given function.
+
+        :param filter_function: Function to filter. The function takes an FDDReadRow and returns a boolean (true if the row should be kept)
+        :param row_to_key: Function used to compute keys
+        """
+        self.load_keys(row_to_key, filter_function)
+
         
     def load_new_split(self, split: str) -> None:
         """
@@ -235,6 +285,10 @@ class RFDD(BaseFDD):
 
         :param split: The name of the split to load.
         """
+        filter_func_str = None
+        if '$' in split:
+            split, filter_func_str = split.split('$')
+
 
         if '+' in split:
             splits= split.split('+')
@@ -242,19 +296,18 @@ class RFDD(BaseFDD):
             # make sure they're all the same type
             if not all(type(s) == type(split_objects[0]) for s in split_objects):
                 raise ValueError("All splits must be of the same type.")
-            if type(split_objects[0]) == FDDIndexComparableKey:
+            if isinstance(split_objects[0],FDDIndexComparableKey):
                 dct = {}
                 for s in split_objects:
                     for k,v in s.items():
                         dct[k] = v
                 self.index = FDDIndexComparableKey(dct)
-            elif type(split_objects[0]) == FDDIndexGeneral:
+            elif isinstance(split_objects[0], FDDIndexGeneral):
                 self.index = split_objects[0]
                 for s in split_objects[1:]:
                     for k,v in s.items():
                         self.index[k] = v
-
-            elif type(split_objects[0]) == FDDIndexKeyless:
+            elif isinstance(split_objects[0], FDDIndexKeyless) or isinstance(split_objects[0], FDDOnDiskIndex):
                 rows = {}
                 for s in split_objects:
                     for v in s.values():
@@ -264,8 +317,17 @@ class RFDD(BaseFDD):
                     # print(i,r, len(self.index.buffer), len(self.index))
                     # print(len(self.index.buffer), self.index.byte_width,self.index.num_vals)
                     self.index[i] = r
+            else:
+                raise ValueError('split type',type(split_objects[0]),'not found')
+            
         else:
+            
             self.index = self._get_split_object(split)
+
+        if filter_func_str:
+            filter_func_str = 'lambda r:' + filter_func_str
+            filter_func = eval(filter_func_str)
+            self.filter(filter_func)
 
     def get_available_splits(self) -> List[str]:
         """
@@ -294,10 +356,6 @@ class RFDD(BaseFDD):
         for k in self.split_to_index:
             index_index.pop('_split_'+k)
 
-        # index_start, index_end = self.split_to_index[split]
-        
-        # self.index = self.system_deserialize(self.read_chunk(index_start, index_end))
-        self.load_new_split(split)
         
         if '_columns_' not in index_index:
             self.columns = None
@@ -321,8 +379,12 @@ class RFDD(BaseFDD):
             self.column_to_deserialize = {v: type_to_deserializer[t] if isinstance(t, str) else t[1] for v, t in self.column_def.items()}   
             self.column_to_deserialize = tuple(self.column_to_deserialize.values())
                 
+        
 
         self.custom_properties = {k[6:]:v for k,v in index_index.items() if k.startswith('_prop_')}
+
+        self.load_new_split(split)
+
 
 
     def __getattr__(self, name: str) -> Any:
@@ -342,6 +404,201 @@ class RFDD(BaseFDD):
             return loaded_prop
         else:
             return super().__getattr__(name)
+
+class RFDDCombined:
+    """
+    Convenience class to allow reading from multiple FDDs as one FDD. Load comma separated list of FDD specs.
+    """
+    def __init__(self,
+                 filename: str,
+                 split: str = 'all_rows',
+                 system_deserialize: callable = pkl.loads) -> None:
+        self.rfdds = [RFDD(i) for i in filename.split(',')]
+
+        which_are_keyless = [isinstance(i.index,FDDOnDiskIndex) or isinstance(i.index,FDDIndexKeyless) for i in self.rfdds]
+        self.all_keyless = all(which_are_keyless)
+        
+        if not self.all_keyless and sum(which_are_keyless) > 1:
+            warnings.warn("Behavior is undefined when using a mix of keyless and not keyless rfdds.")
+                
+
+
+    def __len__(self) -> int:
+        """
+        returns the sum of 
+        """
+        return sum([len(i) for i in self.rfdds])
+    
+    def __contains__(self, key: Any) -> bool:
+        if self.all_keyless:
+            if isinstance(key,int):
+                return key >= 0 and key < self.__len__()
+            else:
+                raise KeyError('key is not an integer and all RFDDs have keyless splits', key)
+        else:
+            for rfdd in self.rfdds:
+                if key in rfdd:
+                    return True
+        return False
+    
+    def keys(self) -> Iterator[Any]:
+        if self.all_keyless:
+            return range(self.__len__())
+        
+        class ItemsWithLength:
+            def __init__(self, parent):
+                self.parent = parent
+
+            def __iter__(self):
+                for rfdd in self.parent.rfdds:
+                    for k in rfdd.keys():
+                        yield k
+
+            def __len__(self):
+                return len(self.parent)
+
+        return ItemsWithLength(self)
+    
+
+    
+    def __iter__(self):
+        for k in self.keys():
+            yield k, self[k]
+
+    def items(self) -> Iterator[Tuple[Any, 'FDDReadRow']]:
+        """ Yield (key, value) pairs, with length awareness for tqdm compatibility. """
+        class ItemsWithLength:
+            def __init__(self, parent):
+                self.parent = parent
+
+            def __iter__(self):
+                for k in self.parent.keys():
+                    yield k, self.parent[k]
+
+            def __len__(self):
+                return len(self.parent)
+
+        return ItemsWithLength(self)
+
+
+
+    def __enter__(self) -> 'BaseFDD':
+        """
+        This method is called when entering the context.
+        For example, when using the `with` statement.
+        """
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+        This method is called when exiting the context.
+        For example, when using the `with` statement.
+        The close method of the child class is called.
+        In the case of WFDD, the index is written to the file.
+        """
+        for rfdd in self.rfdds:
+            rfdd.close()
+    
+    def close(self) -> None:
+        for rfdd in self.rfdds:
+            rfdd.close()
+
+    def _after_fork(self) -> None:
+        """
+        Reopen the file after a fork to prevent race conditions
+        if the object is cloned to another process. For example when using PyTorch DataLoader.
+        """
+        for rfdd in self.rfdds:
+            rfdd.file.close()
+            rfdd.file = open(rfdd.filename, 'rb+')
+
+    def __getstate__(self) -> object:
+        """
+        Returns the state of the object for pickling.
+        the file object is removed because it cannot be pickled.
+        """
+        state = {'all_keyless':self.all_keyless}
+        for i,rfdd in enumerate(self.rfdds):
+            state[i] = rfdd.__get_state()
+        
+        return state
+    
+    def __setstate__(self, state: Dict[str, Any]) -> None:
+        """
+        Sets the state of the object after unpickling.
+        The file object is reopened.
+        """
+        self.all_keyless=state['all_keyless']
+        for k,v in state:
+            self.rfdds[k].__dict__.update(v)
+            self.rfdds[k] = open(v.filename, 'rb+')
+
+    def __getitem__(self, key: Any) -> Union['FDDReadRow', Any]:
+        """
+        Retrieves an item from one of the underlying RFDDs.
+
+        Each consituent RFDD is checked for the key in-turn and the value from the first one found is returned.
+
+        If all of the constituant RFDDs are keylessly indexed, then each FDD is concatenated (rfdd[0], rfdd[1], ...) and the rows are 
+            re-keyed according to their new order in the combined row list
+        """
+        if self.all_keyless:
+            if key not in self:
+                raise KeyError('Key not found,', key)
+            for rfdd in self.rfdds:
+                if key in rfdd:
+                    return rfdd[key]
+                key -= len(rfdd)
+        else:
+            for rfdd in self.rfdds:
+                if key in rfdd:
+                    return rfdd[key]
+            raise KeyError('Key not found,', key)
+                        
+    def load_keys(self, row_to_key: callable, filter_function: callable=lambda x:True) -> None:
+        """
+        Compute keys of each row and set index to reflect computed keys
+
+        :param row_to_key: Function used to compute keys
+        :param filter_function: Function to filter. The function takes an FDDReadRow and returns a boolean (true if the row should be kept)
+        """
+        for rfdd in self.rfdds:
+            rfdd.load_keys(row_to_key,filter_function)
+
+        self.all_keyless = False
+
+        
+        
+    def filter(self, filter_function: callable, row_to_key: callable=None) -> None:
+        """
+        Filter rows of FDD. Optionally also load keys using the given function.
+
+        :param filter_function: Function to filter. The function takes an FDDReadRow and returns a boolean (true if the row should be kept)
+        :param row_to_key: Function used to compute keys
+        """
+        self.load_keys(row_to_key, filter_function)
+
+        
+
+
+def RFDD(filename: str,
+         split: str = 'all_rows',
+         system_deserialize: callable = pkl.loads) -> RFDDImpl | RFDDCombined:
+    """
+    Factory function to open FDD for reading
+    
+    :return: RFDD described by filename as appropriate datatype (RFDDImpl | RFDDCombined)
+    """
+    if ',' in filename:
+        return RFDDCombined(filename, split,system_deserialize)
+    else:
+        return RFDDImpl(filename, split,system_deserialize)
+    
+    
+
+    
+        
+
 
 class FDDReadRow:
     """
@@ -522,7 +779,7 @@ class WFDD(BaseFDD):
         super().__init__(filename)
         
         if not overwrite and not reopen and os.path.exists(filename):
-            raise FileExistsError("File already exists.", filename)
+            raise FileExistsError("File already exists.", filename, 'overwrite=True to overwrite')
         
         if reopen and not os.path.exists(filename):
             raise FileNotFoundError("File not found.", filename)
@@ -674,26 +931,43 @@ class WFDD(BaseFDD):
                 self.file.write(data)
             positions.append(self.file.tell())
             
-        self.index[key] = tuple(positions)    
+        self.index[key] = tuple(positions)
 
-    def make_split(self, split: str, rows: Iterable, overwrite=False, keyless=False, preserve_order=True) -> None:
+    def add_split(self, *args, **kwargs) -> None:
+        self.make_split(*args, **kwargs)
+
+    def make_split(self, split: str, rows: Iterable|callable, overwrite=False, keyless=False, preserve_order=True) -> None:
         """
         Create a split in the WFDD.
 
         :param split: The name of the split.
-        :param rows: The iterable of keys for the split.
+        :param rows: The iterable of keys for the split. Can also take a filter function that can be used to select the appropriate rows.
         """
-        if split in self.split_to_index and not overwrite:
-            raise ValueError("Split already exists.", split, 'Use overwrite=True to overwrite it.')
+
         
+
+        if split in self.split_to_index and not overwrite:
+            raise ValueError("Split already exists.", split, 'Use overwrite=True to overwrite it. Existing splits:', self.split_to_index.keys())
+        
+        filter_func=None
+        if callable(rows):
+            rows, filter_func = self.keys(), rows
+
+
         if not isinstance(rows, str):
             
             if keyless:
                 split_index = FDDIndexKeyless(num_vals=len(self.columns)+1 if self.columns is not None else 2)
                 for i, key in enumerate(rows):
-                    split_index[i] = self.index[key]
+                    if not filter_func or filter_func(self[key]):
+                        split_index[i] = self.index[key]
             else:
-                split_index_dict = {key: self.index[key] for key in rows}
+                # split_index_dict = {key: self.index[key] for key in rows}
+                split_index_dict = {}
+                for key in rows:
+                    if not filter_func or filter_func(self[key]):
+                        split_index_dict[key] = self.index[key]
+                
                 try:
                     if not preserve_order:
                         split_index = FDDIndexComparableKey(split_index_dict)
@@ -745,7 +1019,12 @@ class WFDD(BaseFDD):
         index_start, index_end = self.split_to_index["all_rows"]
         earliest = min(index_start,earliest)
         
-        self.index = self.system_deserialize(self.read_chunk(index_start, index_end))
+        self.file.seek(index_start)
+        keyless_indicator = self.file.read(1)
+        if keyless_indicator ==b'\01':
+            self.index = FDDOnDiskIndex(self.file,index_start+1)
+        else:
+            self.index = self.system_deserialize(self.read_chunk(index_start, index_end))
 
         new_split_to_index = {}
         for k,v in self.split_to_index.items():
@@ -753,7 +1032,12 @@ class WFDD(BaseFDD):
                 continue
             split_start, split_end = v
             earliest = min(split_start,earliest)
-            new_split_to_index[k] = self.system_deserialize(self.read_chunk(split_start, split_end))
+            self.file.seek(split_start)
+            keyless_indicator = self.file.read(1)
+            if keyless_indicator ==b'\01':
+                new_split_to_index[k] = FDDOnDiskIndex(self.file, split_start+1)
+            else:
+                new_split_to_index[k] = self.system_deserialize(self.read_chunk(split_start, split_end))
 
         self.split_to_index = new_split_to_index
         
@@ -837,8 +1121,15 @@ class WFDD(BaseFDD):
         self.split_to_index['all_rows'] = self.index
         for k,v in self.split_to_index.items():
             split_start = self.file.tell()
-            split_data = self.system_serialize(v)
-            self.file.write(split_data)
+            
+            if isinstance(v, FDDIndexKeyless):
+                # split_data = v.get_index_bytes()
+                # split_data = b'\01'+split_data 
+                self.file.write(b'\01')
+                v.write_index_bytes(self.file)
+            else:
+                split_data = self.system_serialize(v)
+                self.file.write(split_data)
             split_end = self.file.tell()
             index_index["_split_"+k] = (split_start, split_end)
 

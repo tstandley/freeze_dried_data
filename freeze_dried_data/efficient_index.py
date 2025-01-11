@@ -63,6 +63,60 @@ class FDDIndexKeyless(FDDIndexBase):
         else:
             for i, v in enumerate(val):
                 self.buffer[idx*self.num_vals*self.byte_width + i*self.byte_width:idx*self.num_vals*self.byte_width + (i+1)*self.byte_width] = v.to_bytes(self.byte_width, 'little')
+
+    def write_index_bytes(self,file):
+        import struct
+        file.write(struct.pack('<QQQ',self.__len__(), self.num_vals, self.byte_width))
+        file.write(self.buffer)
+
+
+class FDDOnDiskIndex(FDDIndexBase):
+    def __init__(self, file, ptr_in_file):
+        self.file = file
+        file.seek(ptr_in_file)
+        self.len = int.from_bytes(file.read(8), byteorder='little')
+        self.num_vals= int.from_bytes(file.read(8), byteorder='little')
+        self.byte_width= int.from_bytes(file.read(8), byteorder='little')
+
+        self.ptr_in_file = ptr_in_file+8*3
+
+    def __len__(self):
+        return self.len
+    
+    def keys(self):
+        return range(len(self))
+    
+    def items(self):
+        for i in range(len(self)):
+            yield i, self[i]
+
+    def values(self):
+        for i in range(len(self)):
+            yield self[i]
+
+    def __contains__(self, key):
+        return key < len(self) and key >= 0
+    
+    def __iter__(self):
+        for i in range(len(self)):
+            yield self[i]
+
+    def __getitem__(self, idx):
+        if idx >= len(self) or idx < 0:
+            raise IndexError('Index out of bounds', idx, len(self))
+        
+        self.file.seek(self.ptr_in_file+idx*self.num_vals*self.byte_width)
+        buffer = self.file.read(self.num_vals*self.byte_width)
+
+        return FDDIntList(self.num_vals, buffer, byte_width=self.byte_width, start_in_buffer=0)
+
+    
+
+
+
+
+
+
             
 
 class FDDIndexComparableKey(FDDIndexBase):
