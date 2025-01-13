@@ -5,7 +5,7 @@ FDD allows your entire dataset to be a single file while supporting fast random 
 
 Work with FDDs like you would python dictionaries. Keys map to objects. For extra organization and speed, columns can be defined such that every row has a value for each column. 
 
-FDD files can operate in either read mode or write mode. Once a file is finalized, it cannot be modified without being re-written (i.e., it is "freeze-dried"). This allows for increased simplicity and speed compared to databases that allow modification.
+FDD files can operate in either read mode or write mode. With few exceptions, once a file is finalized, it cannot be modified without being re-written (i.e., it is "freeze-dried"). This allows for increased simplicity and speed compared to databases that allow modification.
 
 Values are written to disk immediately upon insertion, while keys are written as part of the index when the FDD file is closed.
 
@@ -17,19 +17,12 @@ Alternatively, you can manually move the `freeze_dried_data.py` file into your p
 
 ## Features
 
-### Performance Features
-- **Selective Data Loading**: The data for a row's column is only loaded from disk when accessed. This allows for dataloaders to ignore certain columns and not incur a performance penalty by loading them from disk.
-
-- **Fast Modified Copying**: When processing a .fdd into a new, modified file, one typically loops through the records in the original file, makes the desired modification/addition to each row, then writes that row out to the new file. FDD directly copies the bits for columns that are unmodified so that no unnecessary serialization/deserialization needs to take place.
-
-- **File Index Is Stored in RAM**: FDD keeps track of the location of each datum in the file using an in-memory index. This allows data to be read in any order with little overhead.
-
 ### Custom Splits
 Define custom splits in your dataset by storing a list of keys for each split. This allows you to easily manage and access different subsets of your dataset, such as train, val, and test sets.
 
 If you key by hash, storing your train, val, and test sets in the same file can reduce the chance of having train/test or train/val overlap.
 
-Custom Splits can also maintain order. This makes it easy to compare a ciriculum with random training for example.
+Custom splits can also maintain order.
 
 Splits also take the place of sharding in many cases. With one split per shard, only the index for the selected split is stored in memory. Everything else can remain on disk. And everything can still remain in a single file.
 
@@ -37,6 +30,24 @@ Splits can be loaded as part of the path with the ^ separator. This allows flags
 
 Using the + signifier in the split specificaiton, the union of two or more splits can be loaded (i.e. split='train+val' will load the union of the train and val splits)
 
+### Performance Features
+- **Selective Data Loading**: The data for a row's column is only loaded from disk when accessed. This allows for dataloaders to ignore certain columns and not incur a performance penalty by loading them from disk.
+
+- **Fast Modified Copying**: When processing a .fdd into a new, modified file, one typically loops through the records in the original file, makes the desired modification/addition to each row, then writes that row out to the new file. FDD directly copies the bits for columns that are unmodified so that no unnecessary serialization/deserialization needs to take place.
+
+- **Keyless Splits**: FDD allows keyless splits and indices.
+  ```
+  wfdd.make_split(split_name,keys_in_split,keyless=True)
+  ```
+  Because they do not keep keys in memory, nor write them to disk, keyless splits are much more CPU, memory, and disk space efficient. Unlike regular splits, the index of a keyless split is never even loaded to memory. With keyless splits, FDD files load almost instantly in addition to requiring very little RAM.
+
+  When a keyless split is loaded, rows can be accessed by integer from 0 to len(rfdd).
+  ```
+  rfdd[0] # returns the first row in the FDD file.
+  ```
+
+  Using ```load_keys()``` with a custom function that defines the key for each row, keys can be restored so that rows can once again be accessed in random order by key.
+ 
 ### Custom Serialization and Deserialization
 FDD allows custom functions for serializing and deserializing data. This flexibility is especially useful when dealing with complex data types or when performance optimizations are necessary. It also allows on-the-fly compression where the compression algorithm can be chosen on a per-column basis. Finally, custom serialization can be much more efficient when storing tensors (numpy, pytorch, etc.)
 
@@ -185,7 +196,9 @@ with WFDD('dataset_with_properties.fdd') as dataset:
     dataset['key4'] = 'val_data1'
     dataset['key5'] = 'val_data2'
     dataset['key6'] = 'test_data1'
-    dataset.make_split('train', ['key1', 'key2', 'key3'])
+
+    # the training set defined to be an ultra-efficient keyless split
+    dataset.make_split('train', ['key1', 'key2', 'key3'], keyless=True)
     dataset.make_split('val', ['key4', 'key5'])
     dataset.make_split('test', ['key6'])
 
@@ -196,17 +209,20 @@ with RFDD('dataset_with_properties.fdd', split='train') as loaded_dataset:
     print('Creation Date:', loaded_dataset.creation_date)
     print('Description:', loaded_dataset.description)
     # train rows loaded into the index
-    dataset.load_new_split('val')
+    loaded_dataset.load_new_split('val')
     # val rows loaded into the index
-    dataset.load_new_split('test')
+    loaded_dataset.load_new_split('test')
     # test rows loaded into the index
 
+# Optionally load keys for keyless splits
+with RFDD('dataset_with_properties.fdd', split='train') as loaded_dataset:
+    loaded_dataset.load_keys(lambda x:x) # keys are now the same as the row.
 ```
-### Example 6: Split union and split as part of filename
+### Example 6: Split operations as part of filename
 ```python
 from freeze_dried_data import WFDD, RFDD
 with RFDD('dataset_with_properties.fdd^train') as loaded_dataset:
-    pass # loads the training split only
+    # training split is loaded
 
 with RFDD('dataset_with_properties.fdd^train+val') as loaded_dataset:
     pass # loads the union of the train and val sets
@@ -216,6 +232,12 @@ with RFDD('dataset_with_properties.fdd' split='train+val') as loaded_dataset:
 
 with RFDD('dataset_with_properties.fdd') as loaded_dataset:
     pass # loads all rows
+
+with RFDD('dataset_with_properties.fdd$r[-1]=="1"') as loaded_dataset:
+    pass # loads rows 'train_data1', 'val_data1', 'test_data1'
+
+with RFDD('dataset_with_properties.fdd,dataset_with_properties2.fdd') as loaded_dataset:
+    pass # loads both FDD's as a single FDD object.
 ```
 
 ### Example 7: Using custom Serialization
