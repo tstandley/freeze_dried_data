@@ -4,7 +4,6 @@ from typing import Any, Dict, Iterator, Tuple, Optional, Union, List, Iterable
 import sys
 import warnings
 import zlib
-import torch
 
 try:
     from .efficient_index import FDDIndexKeyless, FDDIndexComparableKey, FDDIntList, FDDIndexGeneral, FDDIndexBase,FDDOnDiskIndex
@@ -23,7 +22,6 @@ type_to_serializer = {
     'int32': lambda x: x.to_bytes(4, 'little'),
     'int16': lambda x: x.to_bytes(2, 'little'),
     'int8': lambda x: x.to_bytes(1, 'little'),
-    'torch': lambda x: pkl.dumps(x.cpu().numpy()),
 }
 
 type_to_deserializer = {
@@ -37,7 +35,6 @@ type_to_deserializer = {
     'int32': lambda x: int.from_bytes(x, 'little'),
     'int16': lambda x: int.from_bytes(x, 'little'),
     'int8': lambda x: int.from_bytes(x, 'little'),
-    'torch': lambda x: torch.from_numpy(pkl.loads(x)),
 }
 
 class BaseFDD:
