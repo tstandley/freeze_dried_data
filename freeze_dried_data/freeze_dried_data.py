@@ -5,11 +5,16 @@ import sys
 import warnings
 import zlib
 
+
+
 try:
     from .efficient_index import FDDIndexKeyless, FDDIndexComparableKey, FDDIntList, FDDIndexGeneral, FDDIndexBase,FDDOnDiskIndex
 except ImportError:
     from efficient_index import FDDIndexKeyless, FDDIndexComparableKey, FDDIntList, FDDIndexGeneral, FDDIndexBase,FDDOnDiskIndex
-     
+
+
+
+
 
 type_to_serializer = {
     'any': pkl.dumps,
@@ -123,6 +128,7 @@ class RFDDImpl(BaseFDD):
     def __init__(self,
                  filename: str,
                  split: str = 'all_rows',
+                 allow_cell_modification: bool = False,
                  system_deserialize: callable = pkl.loads) -> None:
         
 
@@ -130,16 +136,14 @@ class RFDDImpl(BaseFDD):
         if '^' in filename:
             filename, split = filename.split('^')
         super().__init__(filename)
-        self.file = open(filename, 'rb')
+        self.allow_cell_modification = allow_cell_modification
+        if allow_cell_modification:
+            self.file = open(filename, 'rb+')
+        else:
+            self.file = open(filename, 'rb')
         self.system_deserialize = system_deserialize
         self.no_columns_deserialize = pkl.loads
         self.column_to_deserialize = None
-        self.columns=None
-
-
-        if self.columns is not None and self.column_to_deserialize is None:
-            self.column_to_deserialize = tuple(self.system_deserialize for i in range(len(self.columns)))
-        
         
         self.custom_properties_cache = {}
         self.read_row_cache = None
@@ -233,7 +237,7 @@ class RFDDImpl(BaseFDD):
             self.file.seek(start)
             byte = self.file.read(1)
             if byte==b'\01': # this is a keyless split
-                return FDDOnDiskIndex(self.file,start+1)
+                return FDDOnDiskIndex(self,start+1)
             else:
                 return self.system_deserialize(self.read_chunk(start, end))
 
@@ -292,7 +296,8 @@ class RFDDImpl(BaseFDD):
             split_objects = [self._get_split_object(s) for s in splits]
             # make sure they're all the same type
             if not all(type(s) == type(split_objects[0]) for s in split_objects):
-                raise ValueError("All splits must be of the same type.")
+                raise ValueError("All splits must be of the same type to use + operator")
+            
             if isinstance(split_objects[0],FDDIndexComparableKey):
                 dct = {}
                 for s in split_objects:
@@ -311,8 +316,6 @@ class RFDDImpl(BaseFDD):
                         rows[tuple([i for i in v])] = True
                 self.index = FDDIndexKeyless(split_objects[0].num_vals, split_objects[0].byte_width)
                 for i,r in enumerate(rows.keys()):
-                    # print(i,r, len(self.index.buffer), len(self.index))
-                    # print(len(self.index.buffer), self.index.byte_width,self.index.num_vals)
                     self.index[i] = r
             else:
                 raise ValueError('split type',type(split_objects[0]),'not found')
@@ -375,6 +378,8 @@ class RFDDImpl(BaseFDD):
 
             self.column_to_deserialize = {v: type_to_deserializer[t] if isinstance(t, str) else t[1] for v, t in self.column_def.items()}   
             self.column_to_deserialize = tuple(self.column_to_deserialize.values())
+            self.column_to_serialize = {v: type_to_serializer[t] if isinstance(t, str) else t[0] for v, t in self.column_def.items()}   
+            self.column_to_serialize = tuple(self.column_to_serialize.values())
                 
         
 
@@ -408,9 +413,12 @@ class RFDDCombined:
     """
     def __init__(self,
                  filename: str,
-                 split: str = 'all_rows',
+                 split: str,
+                 allow_cell_modification = False,
                  system_deserialize: callable = pkl.loads) -> None:
-        self.rfdds = [RFDD(i) for i in filename.split(',')]
+        self.rfdds = [
+                RFDDImpl(i, split, allow_cell_modification=allow_cell_modification,system_deserialize=system_deserialize)
+            for i in filename.split(',')]
 
         which_are_keyless = [isinstance(i.index,FDDOnDiskIndex) or isinstance(i.index,FDDIndexKeyless) for i in self.rfdds]
         self.all_keyless = all(which_are_keyless)
@@ -580,6 +588,7 @@ class RFDDCombined:
 
 def RFDD(filename: str,
          split: str = 'all_rows',
+         allow_cell_modification: bool = False,
          system_deserialize: callable = pkl.loads) -> RFDDImpl | RFDDCombined:
     """
     Factory function to open FDD for reading
@@ -587,9 +596,9 @@ def RFDD(filename: str,
     :return: RFDD described by filename as appropriate datatype (RFDDImpl | RFDDCombined)
     """
     if ',' in filename:
-        return RFDDCombined(filename, split,system_deserialize)
+        return RFDDCombined(filename, split, allow_cell_modification, system_deserialize)
     else:
-        return RFDDImpl(filename, split,system_deserialize)
+        return RFDDImpl(filename, split, allow_cell_modification, system_deserialize)
     
     
 
@@ -685,7 +694,7 @@ class FDDReadRow:
         if name.startswith('_fdd_row_'):
             super().__setattr__(name, value)
             return
-        if isinstance(self._fdd_row_parent, WFDD):
+        if isinstance(self._fdd_row_parent, WFDD) and not self._fdd_row_parent.allow_cell_modification:
             raise AttributeError("Row has already been finalized.")
         columns = self._fdd_row_parent.columns
         if name not in columns:
@@ -693,6 +702,29 @@ class FDDReadRow:
         
         index = columns[name] if isinstance(columns, dict) else columns.index(name)
         self._fdd_row_cache[index] = value
+        if self._fdd_row_parent.allow_cell_modification:
+            self.write_to_disk(index,value)
+    
+    def write_to_disk(self, position: int, value: Any):
+        existing_start = self._fdd_row_index[position]
+        existing_end = self._fdd_row_index[position+1]
+        print('writing')
+        print(existing_start, existing_end)
+        
+        serialize_fun = self._fdd_row_parent.column_to_serialize[position]
+        value_bytes = serialize_fun(value)
+        print(len(value_bytes))
+        if len(value_bytes) == existing_end-existing_start:
+            save_pos = self._fdd_row_parent.file.tell()
+            self._fdd_row_parent.file.seek(existing_start)
+            self._fdd_row_parent.file.write(value_bytes)
+            self._fdd_row_parent.file.seek(save_pos)
+        else:
+            raise ValueError("The new cell data must be the same size as the data in the cell it's replacing. Existing size,", existing_end-existing_start, "New size,", len(value_bytes))
+
+
+
+
 
     def __contains__(self, key: str) -> bool:
         """
@@ -769,11 +801,13 @@ class WFDD(BaseFDD):
                  columns: dict[str, str | tuple[callable, callable]] = None,
                  overwrite: bool = False,
                  reopen: bool = False,
+                 allow_cell_modification = False,
                  system_serialize: callable = pkl.dumps,
                  system_deserialize: callable = pkl.loads,
                  ) -> None:
         self.__dict__['_initializing'] = True # Use self.__dict__ to bypass __setattr__
         super().__init__(filename)
+        
         
         if not overwrite and not reopen and os.path.exists(filename):
             raise FileExistsError("File already exists.", filename, 'overwrite=True to overwrite')
@@ -785,7 +819,7 @@ class WFDD(BaseFDD):
         
         column_to_deserialize = {v: type_to_deserializer[t] if isinstance(t, str) else t[1] for v, t in columns.items()} if columns is not None else None
         
-        self.column_def = columns
+        self.allow_cell_modification = allow_cell_modification
 
         if columns is not None:
             self.column_to_deserialize = tuple(column_to_deserialize.values())
@@ -802,6 +836,7 @@ class WFDD(BaseFDD):
 
         if reopen:
             self.reopen()
+            
         else:
             self.file = open(filename, 'wb+')
             self.unfinished_setters = {}
@@ -811,6 +846,18 @@ class WFDD(BaseFDD):
             self.custom_properties = {}
             self.split_to_index = {}
         
+        
+        if not hasattr(self,'column_def'):
+            self.column_def = columns
+            if columns is not None:
+                self.columns = tuple(columns.keys())
+            
+
+        if columns is not None and reopen:
+            self.columns = tuple(columns.keys())
+            self.column_def=columns
+
+
         self._initializing = False
 
     def __setattr__(self, name: str, value: Any) -> None:
@@ -941,8 +988,6 @@ class WFDD(BaseFDD):
         :param rows: The iterable of keys for the split. Can also take a filter function that can be used to select the appropriate rows.
         """
 
-        
-
         if split in self.split_to_index and not overwrite:
             raise ValueError("Split already exists.", split, 'Use overwrite=True to overwrite it. Existing splits:', self.split_to_index.keys())
         
@@ -955,9 +1000,11 @@ class WFDD(BaseFDD):
             
             if keyless:
                 split_index = FDDIndexKeyless(num_vals=len(self.columns)+1 if self.columns is not None else 2)
-                for i, key in enumerate(rows):
+                i=0
+                for key in rows:
                     if not filter_func or filter_func(self[key]):
                         split_index[i] = self.index[key]
+                        i+=1
             else:
                 # split_index_dict = {key: self.index[key] for key in rows}
                 split_index_dict = {}
@@ -1007,7 +1054,6 @@ class WFDD(BaseFDD):
         index_index = self.system_deserialize(index_index_data)
         
         self.split_to_index = {k[7:]:v for k,v in index_index.items() if k.startswith('_split_')}
-        
 
         # remove splits from index_index
         for k in self.split_to_index:
@@ -1019,7 +1065,8 @@ class WFDD(BaseFDD):
         self.file.seek(index_start)
         keyless_indicator = self.file.read(1)
         if keyless_indicator ==b'\01':
-            self.index = FDDOnDiskIndex(self.file,index_start+1)
+            self.index = FDDOnDiskIndex(self.parent,index_start+1)
+            self.index = self.index.get_keyless_index()
         else:
             self.index = self.system_deserialize(self.read_chunk(index_start, index_end))
 
@@ -1032,7 +1079,7 @@ class WFDD(BaseFDD):
             self.file.seek(split_start)
             keyless_indicator = self.file.read(1)
             if keyless_indicator ==b'\01':
-                new_split_to_index[k] = FDDOnDiskIndex(self.file, split_start+1)
+                new_split_to_index[k] = FDDOnDiskIndex(self, split_start+1).get_keyless_index()
             else:
                 new_split_to_index[k] = self.system_deserialize(self.read_chunk(split_start, split_end))
 
@@ -1048,6 +1095,26 @@ class WFDD(BaseFDD):
             self.columns = self.system_deserialize(self.read_chunk(columns_start, columns_end))
             
         self.custom_properties = {k[6:]:v for k,v in index_index.items() if k.startswith('_prop_')}
+
+        
+        if '_column_def_' in index_index:
+            
+            column_def_start, column_def_end = index_index['_column_def_']
+            index_index.pop('_column_def_')
+            try:
+                self.column_def = self.system_deserialize(self.read_chunk(column_def_start, column_def_end))
+            except Exception as e:
+                import dill
+                self.column_def = dill.loads(self.read_chunk(column_def_start, column_def_end))
+
+            self.column_to_deserialize = {v: type_to_deserializer[t] if isinstance(t, str) else t[1] for v, t in self.column_def.items()}   
+            self.column_to_deserialize = tuple(self.column_to_deserialize.values())
+
+            self.column_to_serialize = {v: type_to_serializer[t] if isinstance(t, str) else t[0] for v, t in self.column_def.items()}   
+            self.column_to_serialize = tuple(self.column_to_serialize.values())
+            
+
+            
         
         # need to figure out where to seek so that we are at the end of the rows. Everything else shoudl be in ram.
         new_custom_properties = {}
@@ -1094,6 +1161,7 @@ class WFDD(BaseFDD):
                     break
         
         if self.column_def is not None:
+            
             column_def_start = self.file.tell()
             if not has_lambda:
                 column_def_data = self.system_serialize(self.column_def)
@@ -1124,6 +1192,9 @@ class WFDD(BaseFDD):
                 # split_data = b'\01'+split_data 
                 self.file.write(b'\01')
                 v.write_index_bytes(self.file)
+            elif isinstance(v, FDDOnDiskIndex):
+                self.file.write(b'\01')
+                v.get_keyless_index().write_index_bytes(self.file)
             else:
                 split_data = self.system_serialize(v)
                 self.file.write(split_data)
@@ -1137,12 +1208,16 @@ class WFDD(BaseFDD):
             columns_end = self.file.tell()
             index_index['_columns_'] = (columns_start, columns_end)
 
+        
         index_index_data = self.system_serialize(index_index)
         index_index_data_length = len(index_index_data)
 
         self.file.write(index_index_data)
         self.file.write(index_index_data_length.to_bytes(8, 'little'))
         self.file.flush()
+
+
+        self.file.truncate(self.file.tell())
         super().close()
 
 class FDDSetter:
@@ -1181,7 +1256,27 @@ class FDDSetter:
             return
         
         if self._fdd_setter_finalized:
-            raise AttributeError("Row has already been finalized.")
+            if not self._fdd_setter_parent.allow_cell_modification:
+                raise AttributeError("Row has already been finalized.")
+            else:
+                row_index = self._fdd_setter_parent.index[self._fdd_setter_key]
+                position = self._fdd_setter_parent.columns.index(name)
+                existing_start = row_index[position+1]
+                existing_end = row_index[position+1]
+                # print('writing')
+                # print(existing_start, existing_end)
+                serialize_fun = self._fdd_setter_parent.column_to_serialize[position]
+                value_bytes = serialize_fun(value)
+                if len(value_bytes) == existing_end-existing_start:
+                    save_pos=self._fdd_setter_parent.file.tell()
+                    self._fdd_setter_parent.file.seek(existing_start)
+                    self._fdd_setter_parent.file.write(value_bytes)
+                    self._fdd_setter_parent.file.seek(save_pos)
+                else:
+                    raise ValueError("The new cell data must be the same size as the data in the cell it's replacing. Existing size,", existing_end-existing_start, "New size,", len(value_bytes))
+
+                
+                
         
         columns = self._fdd_setter_parent.columns
         if name not in columns:

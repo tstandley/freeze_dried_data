@@ -71,12 +71,15 @@ class FDDIndexKeyless(FDDIndexBase):
 
 
 class FDDOnDiskIndex(FDDIndexBase):
-    def __init__(self, file, ptr_in_file):
-        self.file = file
-        file.seek(ptr_in_file)
-        self.len = int.from_bytes(file.read(8), byteorder='little')
-        self.num_vals= int.from_bytes(file.read(8), byteorder='little')
-        self.byte_width= int.from_bytes(file.read(8), byteorder='little')
+    def __init__(self, parent, ptr_in_file):
+        self.parent = parent
+        self.parent.file.seek(ptr_in_file)
+        self.len = int.from_bytes(self.parent.file.read(8), byteorder='little')
+        self.num_vals= int.from_bytes(self.parent.file.read(8), byteorder='little')
+        self.byte_width= int.from_bytes(self.parent.file.read(8), byteorder='little')
+
+        assert(self.byte_width <= 16)
+
 
         self.ptr_in_file = ptr_in_file+8*3
 
@@ -105,10 +108,18 @@ class FDDOnDiskIndex(FDDIndexBase):
         if idx >= len(self) or idx < 0:
             raise IndexError('Index out of bounds', idx, len(self))
         
-        self.file.seek(self.ptr_in_file+idx*self.num_vals*self.byte_width)
-        buffer = self.file.read(self.num_vals*self.byte_width)
+        self.parent.file.seek(self.ptr_in_file+idx*self.num_vals*self.byte_width)
+        buffer = self.parent.file.read(self.num_vals*self.byte_width)
 
         return FDDIntList(self.num_vals, buffer, byte_width=self.byte_width, start_in_buffer=0)
+    
+    def get_keyless_index(self):
+        
+        keyless = FDDIndexKeyless(self.num_vals,self.byte_width)
+        self.parent.file.seek(self.ptr_in_file)
+        keyless.buffer = self.parent.file.read(len(self)*self.num_vals*self.byte_width)
+        return keyless
+        
 
     
 
