@@ -708,12 +708,10 @@ class FDDReadRow:
     def write_to_disk(self, position: int, value: Any):
         existing_start = self._fdd_row_index[position]
         existing_end = self._fdd_row_index[position+1]
-        print('writing')
-        print(existing_start, existing_end)
         
         serialize_fun = self._fdd_row_parent.column_to_serialize[position]
         value_bytes = serialize_fun(value)
-        print(len(value_bytes))
+        
         if len(value_bytes) == existing_end-existing_start:
             save_pos = self._fdd_row_parent.file.tell()
             self._fdd_row_parent.file.seek(existing_start)
