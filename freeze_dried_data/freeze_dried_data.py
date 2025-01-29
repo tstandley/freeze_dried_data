@@ -22,7 +22,7 @@ type_to_serializer = {
     'str_compressed': lambda x: zlib.compress(x.encode('utf-8')),
     'bytes': lambda x: x,
     'int128': lambda x: x.to_bytes(16, 'little'),
-    'int64': lambda x: x.to_bytes(8, 'little'),
+.    'int64': lambda x: x.to_bytes(8, 'little'),
     'int': lambda x: x.to_bytes(8, 'little'),
     'int32': lambda x: x.to_bytes(4, 'little'),
     'int16': lambda x: x.to_bytes(2, 'little'),
@@ -1063,7 +1063,7 @@ class WFDD(BaseFDD):
         self.file.seek(index_start)
         keyless_indicator = self.file.read(1)
         if keyless_indicator ==b'\01':
-            self.index = FDDOnDiskIndex(self.parent,index_start+1)
+            self.index = FDDOnDiskIndex(self,index_start+1)
             self.index = self.index.get_keyless_index()
         else:
             self.index = self.system_deserialize(self.read_chunk(index_start, index_end))
