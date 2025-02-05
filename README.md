@@ -74,10 +74,12 @@ from freeze_dried_data import WFDD
 # Create the file "new dataset.fdd"
 dataset = WFDD('new dataset.fdd')
 
-# Add the entry 'key1': 'value1' to the dataset and write the value to disk
+# Add the entry 'key1': 'value1' to the dataset
+# and write the value to disk
 dataset['key1'] = 'value1'
 
-# Add the entry 1234: 5678 to the dataset and write the value to disk
+# Add the entry 1234: 5678 to the dataset
+# and write the value to disk
 dataset[1234] = 5678
 
 # Write the index including all keys to disk and close the file
