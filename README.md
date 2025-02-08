@@ -86,7 +86,7 @@ dataset[1234] = 5678
 dataset.close()
 
 # or use a with statement to ensure files are closed when finished
-with WFDD('new dataset.fdd', overwrite=True)
+with WFDD('new dataset.fdd', overwrite=True) as dataset:
     dataset['key1'] = 'value1'
     dataset[1234] = 5678
 ```
@@ -109,7 +109,7 @@ print(list(dataset.keys())) # prints "['key1', 1234]"
 dataset.close()
 
 # or using a with statement
-with RFDD('new dataset.fdd'):
+with RFDD('new dataset.fdd') as dataset:
     for k, v in dataset.items():
         print(k,v)
     print(dataset[1234])
@@ -229,7 +229,7 @@ with RFDD('dataset_with_properties.fdd^train') as loaded_dataset:
 with RFDD('dataset_with_properties.fdd^train+val') as loaded_dataset:
     pass # loads the union of the train and val sets
 
-with RFDD('dataset_with_properties.fdd' split='train+val') as loaded_dataset:
+with RFDD('dataset_with_properties.fdd', split='train+val') as loaded_dataset:
     pass # also loads the union of the train and val sets
 
 with RFDD('dataset_with_properties.fdd') as loaded_dataset:
