@@ -4,7 +4,7 @@ from typing import Any, Dict, Iterator, Tuple, Optional, Union, List, Iterable
 import sys
 import warnings
 import zlib
-
+import struct
 
 
 try:
@@ -22,11 +22,12 @@ type_to_serializer = {
     'str_compressed': lambda x: zlib.compress(x.encode('utf-8')),
     'bytes': lambda x: x,
     'int128': lambda x: x.to_bytes(16, 'little'),
-.    'int64': lambda x: x.to_bytes(8, 'little'),
+    'int64': lambda x: x.to_bytes(8, 'little'),
     'int': lambda x: x.to_bytes(8, 'little'),
     'int32': lambda x: x.to_bytes(4, 'little'),
     'int16': lambda x: x.to_bytes(2, 'little'),
     'int8': lambda x: x.to_bytes(1, 'little'),
+    'float': lambda x: struct.pack('d', x)  # Serialize float as 8-byte double precision
 }
 
 type_to_deserializer = {
@@ -40,6 +41,7 @@ type_to_deserializer = {
     'int32': lambda x: int.from_bytes(x, 'little'),
     'int16': lambda x: int.from_bytes(x, 'little'),
     'int8': lambda x: int.from_bytes(x, 'little'),
+    'float': lambda x: struct.unpack('d', x)[0]  # Deserialize 8-byte double precision float
 }
 
 class BaseFDD:
