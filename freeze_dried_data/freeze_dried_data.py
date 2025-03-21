@@ -12,22 +12,29 @@ try:
 except ImportError:
     from efficient_index import FDDIndexKeyless, FDDIndexComparableKey, FDDIntList, FDDIndexGeneral, FDDIndexBase,FDDOnDiskIndex
 
-
-
-
-
 type_to_serializer = {
     'any': pkl.dumps,
     'str': lambda x: x.encode('utf-8'),
     'str_compressed': lambda x: zlib.compress(x.encode('utf-8')),
     'bytes': lambda x: x,
-    'int128': lambda x: x.to_bytes(16, 'little'),
-    'int64': lambda x: x.to_bytes(8, 'little'),
-    'int': lambda x: x.to_bytes(8, 'little'),
-    'int32': lambda x: x.to_bytes(4, 'little'),
-    'int16': lambda x: x.to_bytes(2, 'little'),
-    'int8': lambda x: x.to_bytes(1, 'little'),
-    'float': lambda x: struct.pack('d', x)  # Serialize float as 8-byte double precision
+    
+    # Signed integers
+    'int128': lambda x: x.to_bytes(16, 'little', signed=True),
+    'int64': lambda x: x.to_bytes(8, 'little', signed=True),
+    'int': lambda x: x.to_bytes(8, 'little', signed=True),
+    'int32': lambda x: x.to_bytes(4, 'little', signed=True),
+    'int16': lambda x: x.to_bytes(2, 'little', signed=True),
+    'int8': lambda x: x.to_bytes(1, 'little', signed=True),
+    
+    # Unsigned integers
+    'uint128': lambda x: x.to_bytes(16, 'little', signed=False),
+    'uint64': lambda x: x.to_bytes(8, 'little', signed=False),
+    'uint': lambda x: x.to_bytes(8, 'little', signed=False),
+    'uint32': lambda x: x.to_bytes(4, 'little', signed=False),
+    'uint16': lambda x: x.to_bytes(2, 'little', signed=False),
+    'uint8': lambda x: x.to_bytes(1, 'little', signed=False),
+    
+    'float': lambda x: struct.pack('d', x)
 }
 
 type_to_deserializer = {
@@ -35,13 +42,24 @@ type_to_deserializer = {
     'str': lambda x: x.decode('utf-8'),
     'str_compressed': lambda x: zlib.decompress(x).decode('utf-8'),
     'bytes': lambda x: x,
-    'int128': lambda x: int.from_bytes(x, 'little'),
-    'int64': lambda x: int.from_bytes(x, 'little'),
-    'int': lambda x: int.from_bytes(x, 'little'),
-    'int32': lambda x: int.from_bytes(x, 'little'),
-    'int16': lambda x: int.from_bytes(x, 'little'),
-    'int8': lambda x: int.from_bytes(x, 'little'),
-    'float': lambda x: struct.unpack('d', x)[0]  # Deserialize 8-byte double precision float
+    
+    # Signed integers
+    'int128': lambda x: int.from_bytes(x, 'little', signed=True),
+    'int64': lambda x: int.from_bytes(x, 'little', signed=True),
+    'int': lambda x: int.from_bytes(x, 'little', signed=True),
+    'int32': lambda x: int.from_bytes(x, 'little', signed=True),
+    'int16': lambda x: int.from_bytes(x, 'little', signed=True),
+    'int8': lambda x: int.from_bytes(x, 'little', signed=True),
+    
+    # Unsigned integers
+    'uint128': lambda x: int.from_bytes(x, 'little', signed=False),
+    'uint64': lambda x: int.from_bytes(x, 'little', signed=False),
+    'uint': lambda x: int.from_bytes(x, 'little', signed=False),
+    'uint32': lambda x: int.from_bytes(x, 'little', signed=False),
+    'uint16': lambda x: int.from_bytes(x, 'little', signed=False),
+    'uint8': lambda x: int.from_bytes(x, 'little', signed=False),
+    
+    'float': lambda x: struct.unpack('d', x)[0]
 }
 
 class BaseFDD:
