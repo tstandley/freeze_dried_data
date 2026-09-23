@@ -13,7 +13,9 @@ Values are written to disk immediately upon insertion, while keys are written as
 ```bash
 pip install freeze-dried-data
 ```
-Alternatively, you can manually move the `freeze_dried_data.py` file into your project directory.
+Alternatively, copy the whole `freeze_dried_data/` package folder (it needs both `freeze_dried_data.py` and `efficient_index.py`) into your project directory.
+
+Requires Python 3.10+. Custom column serializers are stored with [`dill`](https://pypi.org/project/dill/), which is installed as a dependency.
 
 ## Features
 
@@ -28,7 +30,7 @@ Splits also take the place of sharding in many cases. With one split per shard, 
 
 Splits can be loaded as part of the path with the ^ separator. This allows flags for which file to load to also specify which split.
 
-Using the + signifier in the split specificaiton, the union of two or more splits can be loaded (i.e. split='train+val' will load the union of the train and val splits)
+Using the + signifier in the split specification, the union of two or more splits can be loaded (i.e. split='train+val' will load the union of the train and val splits)
 
 ### Performance Features
 - **Selective Data Loading**: The data for a row's column is only loaded from disk when accessed. This allows for dataloaders to ignore certain columns and not incur a performance penalty by loading them from disk.
@@ -53,17 +55,66 @@ FDD allows custom functions for serializing and deserializing data. This flexibi
 
 Custom serializers/deserializers are stored with ```dill``` in the `.fdd` file so that they do not have to be respecified when loaded.
 
+Portability depends on where the functions are defined. Functions imported from a module are stored by reference, so that module must be importable wherever the file is read. Functions defined in `__main__` are stored by value, but the names they use from their global scope (imports, helpers) are not stored. Put the imports inside the functions (see Example 7) so the file can be read from any process.
+
 ### Custom Properties
 Custom properties are a great place to store dataset metadata such as dataset cards or the code/parameters used to generate the data. In read mode, properties are loaded from disk only when accessed, so this need not incur a runtime cost.
 
 ### Seamless Integration
-FDD is designed to work with data loaders in machine learning frameworks like PyTorch. Unlike other solutions, RFDD objects detect when they've been forked to a new process and re-open their file handles. 
+FDD is designed to work with data loaders in machine learning frameworks like PyTorch. Unlike other solutions, RFDD objects detect when they've been forked to a new process and re-open their file handles.
+
+Caveats:
+- This relies on the `fork` start method (the Linux default). An RFDD for a file with columns cannot be pickled with the standard `pickle` module (the built-in column codecs are lambdas), so `spawn`/`forkserver` contexts fail; open the RFDD lazily inside each worker instead. Combined RFDDs (`'a.fdd,b.fdd'`) cannot be pickled at all.
+- RFDD objects are not thread-safe (reads share one file handle). Give each thread its own RFDD.
 
 ### Context Management
 FDD supports Python’s context management (using `with` statements), which ensures that files are properly closed after operations are completed, preventing data corruption and resource leaks.
 
 ### Easy Appending to Existing Files
-FDD supportes reopening existing files for writing. Reopened files retain all rows, custom properties, and splits already added to the file, while allowing new rows, properties, or splits to be written. Splits can also be modified.
+FDD supports reopening existing files for writing. Reopened files retain all rows, custom properties, and splits already added to the file, while allowing new rows, properties, or splits to be written. Splits can also be modified or replaced with `make_split(..., overwrite=True)`. `add_to_split()` works on keyed splits only; rebuild keyless splits with `make_split`.
+
+Reopening with a new `columns=` definition (same number and order of columns) renames columns or swaps their decoders without copying any row data.
+
+### In-Place Cell Modification
+Cells can be overwritten in place, as long as the new value serializes to exactly the same number of bytes. This is a single seek and write: no copy of the file and no rewrite of the index. Fixed-width column types (`int*`, `uint*`, `float`, fixed-size `bytes`) are ideal for values you may want to patch later (scores, labels, flags).
+
+```python
+with RFDD('data.fdd', allow_cell_modification=True) as rfdd:
+    rfdd['key1'].score = 0.93   # attribute assignment writes to disk
+```
+Only attribute assignment writes to disk; `row['score'] = x` changes the in-memory row only. A size mismatch raises `ValueError`. `WFDD(path, reopen=True, allow_cell_modification=True)` supports the same edits while appending.
+
+### Column Types
+| type | encoding | size |
+|---|---|---|
+| `any` (default) | pickle | variable |
+| `str` | UTF-8 | variable |
+| `str_compressed` | zlib(UTF-8) | variable |
+| `bytes` | raw | variable |
+| `int`, `int64` / `int8`, `int16`, `int32`, `int128` | signed little-endian | 8 / 1, 2, 4, 16 bytes |
+| `uint`, `uint64` / `uint8`, `uint16`, `uint32`, `uint128` | unsigned little-endian | 8 / 1, 2, 4, 16 bytes |
+| `float` | IEEE double | 8 bytes |
+| `(serialize_fn, deserialize_fn)` | custom | any |
+
+Missing cells, and values that serialize to zero bytes (e.g. `''` or `b''`), read back as `None`.
+
+### Filtering and Single-Cell Reads
+```python
+rfdd.filter(lambda row: row.label == 1)        # in-memory subset of the loaded split
+RFDD('data.fdd^train$r.label==1')               # same, from a path string
+wfdd.make_split('positives', lambda row: row.label == 1)  # persistent split from a predicate
+rfdd['key1', 'caption']                         # read one cell without building a row
+```
+The `$` expression is evaluated with `eval`; never pass untrusted strings.
+
+### Performance Notes
+- Opening a keyless split reads a small fixed-size header, so it is effectively instant. Opening a keyed split unpickles its whole index.
+- The in-memory index stores packed 6-byte offsets: about `(num_columns + 1) * 6` bytes per row, plus the key objects for keyed splits. Keyless splits stay on disk.
+- `make_split(..., preserve_order=False)` stores keys sorted with binary-search lookup, using less memory than the default insertion-ordered index.
+- Filtering, `load_keys()`, predicate splits, and `+` unions of keyless splits read every row in the split.
+
+### File Format
+Row cells are appended as they are written. On close, the column definitions, custom properties, split indices, and column names are written, followed by a small index of those sections and its 8-byte length. Readers seek to the end of the file and only load what they need.
 
 ## Examples
 
@@ -152,31 +203,15 @@ from freeze_dried_data import RFDD
 with RFDD('text_dataset.fdd') as dataset:
     print(dataset.column_def)
     for key, row in dataset.items():
-        print(row['text'], row['label'])
-        # or
-        print(row.text, row.label)
-        # or
-        print(row[0], row[1])
+        print(row.text, row.label)  # equivalently row['text'] or row[0]
 
 # output:
 # {'text':'str', 'label':'int16'}
 # This is an example document. 1
-# This is an example document. 1
-# This is an example document. 1
-# Another document for classification. 0
-# Another document for classification. 0
 # Another document for classification. 0
 # A third document. 1
-# A third document. 1
-# A third document. 1
-# A fourth document. 0
-# A fourth document. 0
 # A fourth document. 0
 # A fifth document. None
-# A fifth document. None
-# A fifth document. None
-# A sixth document. None
-# A sixth document. None
 # A sixth document. None
 
 ```
@@ -224,41 +259,46 @@ with RFDD('dataset_with_properties.fdd', split='train') as loaded_dataset:
 ```python
 from freeze_dried_data import WFDD, RFDD
 with RFDD('dataset_with_properties.fdd^train') as loaded_dataset:
-    # training split is loaded
+    pass # training split is loaded
 
-with RFDD('dataset_with_properties.fdd^train+val') as loaded_dataset:
-    pass # loads the union of the train and val sets
+# split types must match to use +; train is keyless here, so recreate it keyed or use val+test
+with RFDD('dataset_with_properties.fdd^val+test') as loaded_dataset:
+    pass # loads the union of the val and test sets
 
-with RFDD('dataset_with_properties.fdd', split='train+val') as loaded_dataset:
-    pass # also loads the union of the train and val sets
+with RFDD('dataset_with_properties.fdd', split='val+test') as loaded_dataset:
+    pass # also loads the union of the val and test sets
 
 with RFDD('dataset_with_properties.fdd') as loaded_dataset:
     pass # loads all rows
 
-with RFDD('dataset_with_properties.fdd$r[-1]=="1"') as loaded_dataset:
-    pass # loads rows 'train_data1', 'val_data1', 'test_data1'
+with RFDD('dataset_with_properties.fdd^all_rows$r[-1]=="1"') as loaded_dataset:
+    pass # loads rows 'train_data1', 'val_data1', 'test_data1' ($ filters require a ^split)
 
+# assumes a second file, dataset_with_properties2.fdd, has been written the same way
 with RFDD('dataset_with_properties.fdd,dataset_with_properties2.fdd') as loaded_dataset:
-    pass # loads both FDD's as a single FDD object.
+    pass # loads both FDDs as a single FDD object.
 ```
 
 ### Example 7: Using custom Serialization
 ```python
-import json
-from freeze_dried_data import WFDD
+from freeze_dried_data import WFDD, RFDD
 
+# import inside the functions: dill stores them without their module globals,
+# so other processes can load them without this script
 def my_serializer(obj):
+    import json
     return json.dumps(obj).encode('utf-8')
 
 def my_deserializer(data):
+    import json
     return json.loads(data.decode('utf-8'))
 
 # custom serializers and deserializers are saved in the .fdd with dill and loaded in the RFDD
 with WFDD('custom_data.fdd', columns={'data': (my_serializer, my_deserializer)}) as dataset:
-    dataset['key1'] = {'complex_data': [1, 2, 3]} 
+    dataset['key1'] = {'data': {'complex_data': [1, 2, 3]}}
 
 with RFDD('custom_data.fdd') as dataset:
-    print(dataset['key1'])
+    print(dataset['key1'].data)
 
 # outputs:
 # {'complex_data': [1, 2, 3]}
@@ -267,6 +307,8 @@ with RFDD('custom_data.fdd') as dataset:
 
 ### Example 8: File Reopening
 ```python
+from freeze_dried_data import WFDD
+
 data = {f'key{i}': f'value{i}' for i in range(1000)}
 with WFDD('test_file.fdd', overwrite=True) as wfdd:
     for k, v in data.items():
@@ -292,31 +334,28 @@ with WFDD('test_file.fdd', reopen=True) as wfdd:
 
 ### Example 9: Using in a PyTorch DataLoader with Workers
 ```python
-import torch
 from torch.utils.data import Dataset, DataLoader
-from freeze_dried_data import WFDD
+from freeze_dried_data import WFDD, RFDD
 
-with WFDD('new dataset.fdd') as dataset:
-    
+with WFDD('new dataset.fdd', overwrite=True) as dataset:
     dataset['key1'] = 'train_data1'
     dataset['key2'] = 'train_data2'
     dataset['key3'] = 'train_data3'
     dataset['key4'] = 'val_data1'
     dataset['key5'] = 'val_data2'
-    dataset.make_split('train', ['key1', 'key2', 'key3'])
-    dataset.make_split('val', ['key4', 'key5'])
+    # keyless splits are indexed 0..len-1, so no key list is needed in memory
+    dataset.make_split('train', ['key1', 'key2', 'key3'], keyless=True)
+    dataset.make_split('val', ['key4', 'key5'], keyless=True)
 
 class FDDDataset(Dataset):
     def __init__(self, filename, split='train'):
-        self.fdd = RFDD(filename,split=split)
-        self.keys = list(self.fdd.keys())
+        self.fdd = RFDD(filename, split=split)
     
     def __len__(self):
-        return len(self.keys)
+        return len(self.fdd)
     
     def __getitem__(self, idx):
-        key = self.keys[idx]
-        return key, self.fdd[key]
+        return idx, self.fdd[idx]
 
 dataset = FDDDataset('new dataset.fdd', split='train')
 
@@ -328,6 +367,33 @@ for key, value in dataloader:
     print(f'Batch: {key} - {value}')
 
 # Example output:
-# Batch: ('key3', 'key2') - ('train_data3', 'train_data2')
-# Batch: ('key1',) - ('train_data1',)
+# Batch: tensor([2, 1]) - ('train_data3', 'train_data2')
+# Batch: tensor([0]) - ('train_data1',)
 ```
+For keyed splits, keep `self.keys = list(self.fdd.keys())` and look rows up by `self.keys[idx]`.
+
+### Example 10: Modifying an Existing File
+```python
+from freeze_dried_data import WFDD, RFDD
+
+with WFDD('scores.fdd', columns={'name': 'str', 'score': 'float'}, overwrite=True) as wfdd:
+    for i in range(10):
+        wfdd[f'key{i}'] = {'name': f'item{i}', 'score': 0.0}
+    wfdd.make_split('first_half', [f'key{i}' for i in range(5)])
+
+# overwrite cells in place (same serialized size)
+with RFDD('scores.fdd', allow_cell_modification=True) as rfdd:
+    rfdd['key3'].score = 0.75
+
+# append rows, edit splits and properties, and hide a row
+with WFDD('scores.fdd', reopen=True) as wfdd:
+    wfdd['key10'] = {'name': 'item10', 'score': 1.0}
+    wfdd.add_to_split('first_half', ['key10'])
+    wfdd.make_split('high', lambda row: row.score > 0.5)
+    wfdd.version = 2
+    wfdd.make_split('all_rows', [k for k in wfdd.keys() if k != 'key9'], overwrite=True)
+```
+Hiding rows via `all_rows` does not reclaim disk space; rewrite the file to a new FDD for that.
+
+### Adding a Column
+`add_column(input_path, output_path, column_name, column_data, column_type='any')` writes a copy with one extra column. It only writes the keys present in `column_data` and copies splits by key, so it does not support keyless splits. For those cases, rewrite the file: assigning an unmodified row read from an RFDD (`wfdd[key] = rfdd[key]`) copies its cells as raw bytes, without deserializing them.

@@ -4,7 +4,7 @@ from efficient_index import FDDIntList, FDDIndexKeyless, FDDIndexComparableKey, 
 class TestFDDIndex(unittest.TestCase):
     def setUp(self):
         self.buffer = bytearray(b'\x01\x00\x00\x00\x00\x02\x00\x00\x00\x00\x03\x00\x00\x00\x00')
-        self.fdd_int_list = FDDIntList(3, self.buffer)
+        self.fdd_int_list = FDDIntList(3, self.buffer, byte_width=5)
         self.fdd_index_keyless = FDDIndexKeyless(3)
         self.fdd_index_comparable_key = FDDIndexComparableKey({10: [1, 2, 3], 20: [4, 5, 6]})
         self.fdd_index_general = FDDIndexGeneral(3)

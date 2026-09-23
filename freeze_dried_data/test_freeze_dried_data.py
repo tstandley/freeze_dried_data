@@ -650,7 +650,7 @@ class TestFDD(unittest.TestCase):
 
         
 
-    def test_reaads_in_between_writes_with_columns(self):
+    def test_reads_in_between_writes_with_columns(self):
         num_records = 1000
         data = {f'key{i}': {'name': f'name{i}', 'area': random.random(), 'price': random.random()} for i in range(num_records)}
         
@@ -988,7 +988,7 @@ class TestFDD(unittest.TestCase):
                     num_compared+=1
 
         
-    def test_cell_modificaiton(self):
+    def test_cell_modification(self):
         with WFDD(self.test_file, columns={'name':'str','area':'any', 'price':'any'}, overwrite=True) as wfdd:
             wfdd['house1'] = {'name': 'house1', 'area': 100, 'price': 100000}
             wfdd['house2'] = {'name': 'house2', 'area': 200, 'price': 200000}

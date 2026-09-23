@@ -178,7 +178,7 @@ class RFDDImpl(BaseFDD):
         if the object is cloned to another process. For example when using PyTorch DataLoader.
         """
         self.file.close()
-        self.file = open(self.filename, 'rb+')
+        self.file = open(self.filename, 'rb+' if self.allow_cell_modification else 'rb')
 
     def __getstate__(self) -> object:
         """
@@ -195,7 +195,7 @@ class RFDDImpl(BaseFDD):
         The file object is reopened.
         """
         self.__dict__.update(state)
-        self.file = open(self.filename, 'rb+')
+        self.file = open(self.filename, 'rb+' if self.allow_cell_modification else 'rb')
 
     def __getitem__(self, key: Any) -> Union['FDDReadRow', Any]:
         """
@@ -535,7 +535,7 @@ class RFDDCombined:
         """
         for rfdd in self.rfdds:
             rfdd.file.close()
-            rfdd.file = open(rfdd.filename, 'rb+')
+            rfdd.file = open(rfdd.filename, 'rb+' if rfdd.allow_cell_modification else 'rb')
 
     def __getstate__(self) -> object:
         """
@@ -562,9 +562,9 @@ class RFDDCombined:
         """
         Retrieves an item from one of the underlying RFDDs.
 
-        Each consituent RFDD is checked for the key in-turn and the value from the first one found is returned.
+        Each constituent RFDD is checked for the key in-turn and the value from the first one found is returned.
 
-        If all of the constituant RFDDs are keylessly indexed, then each FDD is concatenated (rfdd[0], rfdd[1], ...) and the rows are 
+        If all of the constituent RFDDs are keylessly indexed, then each FDD is concatenated (rfdd[0], rfdd[1], ...) and the rows are 
             re-keyed according to their new order in the combined row list
         """
         if self.all_keyless:
