@@ -8,8 +8,8 @@ description: 'Work with freeze_dried_data (.fdd) dataset files: inspect columns/
 `freeze_dried_data` is a single-file dataset format with fast random access.
 Verified against the installed 2.6.4 source on 2026-09-22, at
 `/usr/local/lib/python3.12/dist-packages/freeze_dried_data/`. Upstream:
-https://github.com/tstandley/freeze_dried_data. A (older, 2.5.0) local checkout
-lives at `/persist/tstandley/freeze_dried_data/` — prefer the installed package.
+https://github.com/tstandley/freeze_dried_data. Readers in releases after 2.6.4
+reopen `rb` (not `rb+`) after fork/unpickle unless `allow_cell_modification=True`.
 
 Check the active interpreter's package version and module path before relying on
 version-specific behavior; the checkout and installed package differ.
@@ -35,8 +35,9 @@ For deletion/filtering that preserves clusters, read
   values/items do access every column.
 - **Splits** = named subsets of keys. `keyless=True` splits use an on-disk index on read and
   index rows by int `0..len-1`. Load via `RFDD(path, split=name)` or
-  `RFDD('path.fdd^name')`. `'a+b'` = union. `'path.fdd$<expr>'` filters with
-  `lambda r: <expr>`. `'a.fdd,b.fdd'` concatenates files.
+  `RFDD('path.fdd^name')`. `'a+b'` = union. `'path.fdd^split$<expr>'` filters with
+  `lambda r: <expr>` (the `^split` is required; `'path.fdd$expr'` is treated as a
+  filename). `'a.fdd,b.fdd'` concatenates files.
 - Custom properties = dataset metadata: `wfdd.anything = obj`, read as `rfdd.anything`.
 
 ## Procedure: inspect an unknown .fdd
@@ -44,7 +45,7 @@ For deletion/filtering that preserves clusters, read
 1. Run the bundled script (adds the file's directory to `sys.path` so custom
    serializer modules resolve):
    ```bash
-   python /root/.agents/skills/freeze-dried-data/scripts/fdd_inspect.py <file.fdd> [--split NAME] [--rows N] [--import-dir DIR]
+   python scripts/fdd_inspect.py <file.fdd> [--split NAME] [--rows N] [--import-dir DIR]
    ```
 2. If it fails with `ModuleNotFoundError: No module named 'X'`, the column_def
    holds dill-pickled `(serializer, deserializer)` functions from module `X`.
@@ -228,8 +229,9 @@ For keyed splits keep `self.keys = list(self.f.keys())`. Caveats (verified):
   are lambdas), so `spawn`/`forkserver` multiprocessing contexts fail. Column-less
   files pickle fine; `dill` works. Or open the RFDD lazily inside the worker.
 - `RFDDCombined` (`'a.fdd,b.fdd'`) cannot be pickled at all.
-- After fork/unpickle the file is reopened `rb+`, which needs **write
-  permission** on the file (read-only mounts break workers).
+- After fork/unpickle, 2.6.4 and earlier reopen the file `rb+`, which needs
+  **write permission** (read-only mounts break workers). Later releases reopen
+  `rb` unless `allow_cell_modification=True`.
 
 ## Performance characteristics
 
