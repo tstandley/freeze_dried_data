@@ -259,17 +259,6 @@ For keyed splits keep `self.keys = list(self.f.keys())`. Caveats (verified):
 - Custom properties are read lazily on first attribute access and cached.
 - Cell overwrite with the flag is one seek+write: ideal for scores/labels.
 
-## Workspace datasets
-
-The classifier pool is `/persist/tstandley/classifier_agent/diverse_sorting/vlm_ds.fdd`.
-As inspected in September 2026 it contains image bytes, VisMod and SigLIP features,
-and both `kcluster_` and `scluster_` families. The neighboring
-`vlm_ds.fdd.siglip.fdd` is an embedding-only file (`img_hash`, `siglip`), not an
-image dataset. Inspect actual columns and splits rather than infer from filenames.
-Serializer modules are importable from `/persist/tstandley/classifier_agent`.
-Pool-backed project datasets may reference these hashes; a pool rewrite can
-invalidate those references and positional sampler state.
-
 ## Gotchas
 
 - Files are huge; never `list(f.items())` or load a column for every row unless
